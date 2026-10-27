@@ -217,6 +217,7 @@ class GridInterpreter:
         return tables
 
     def _table_item(self, r0, h_end, b_end, c0, c1):
+        full_grid = r0 == 0 and h_end == 0
         cells = [a for a in self.g.cells if r0 <= a.row < b_end and c0 <= a.col < c1]
         bounds = sorted({a.col for a in cells} | {c1})
         leaf = lambda c: bisect.bisect_right(bounds, c) - 1  # noqa: E731
@@ -266,7 +267,8 @@ class GridInterpreter:
         # a row on which no cell begins lies wholly inside cells merged from the row above
         # (a tall Excel row split in two): it is not a row of the form
         body_rows = [r for r in range(h_end, b_end)
-                     if not self._spacer(r, c0, c1) and self.g.row_anchors(r, c0, c1)]
+                     if (full_grid or not self._spacer(r, c0, c1))
+                     and self.g.row_anchors(r, c0, c1)]
         body, cell_boxes, cell_refs = build(body_rows, body=True)
         columns = []
         for lc in range(n_leaf):
@@ -586,6 +588,16 @@ class GridInterpreter:
 
     def interpret(self):
         tables = self._find_tables()
+        # A ruled grid that encloses the detected data table is itself one form table.
+        # Keep its leading title/metadata rows inside the same editable cell matrix.
+        if (
+            len(tables) == 1
+            and tables[0][0] > 0
+            and tables[0][3] == 0
+            and tables[0][4] == self.g.n_cols
+            and tables[0][2] == self.g.n_rows
+        ):
+            tables = [(0, 0, self.g.n_rows, 0, self.g.n_cols)]
         for t in tables:
             self.items.append(self._table_item(*t))
         self._images()
