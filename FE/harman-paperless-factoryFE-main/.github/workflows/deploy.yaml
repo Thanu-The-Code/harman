@@ -1,0 +1,102 @@
+name: Deploy Paperless Factory frontend
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  APP_NAME: paperless-factory-frontend
+  HOST_PORT: "8022"
+  IMAGE: paperless-factory-frontend:${{ github.sha }}
+  # Baked into the bundle at build time (Vite). Change it here, not on the server.
+  VITE_API_URL: https://api.paperlessfactory.pravisht.com
+
+jobs:
+  # Build and deploy are one job so the image goes straight from this runner to
+  # the server without being stored as a GitHub artifact.
+  deploy:
+    name: Build and deploy
+    runs-on: ubuntu-latest
+    env:
+      SSHPASS: ${{ secrets.SERVER_PASSWORD }}
+    steps:
+      - name: Get the code
+        uses: actions/checkout@v4
+
+      - name: Build the image
+        run: docker build --build-arg VITE_API_URL="$VITE_API_URL" -t "$IMAGE" .
+
+      - name: Start the image as a test
+        run: docker run -d --name smoke-test -p 8080:80 "$IMAGE"
+
+      # A deep link must return the app too, or reloading any page but / breaks.
+      - name: Check the page and a deep link load
+        run: |
+          for _ in $(seq 1 10); do
+            if curl -fsS http://127.0.0.1:8080/ | grep -q '<div id="root">' && \
+               curl -fsS http://127.0.0.1:8080/my-approvals | grep -q '<div id="root">'; then
+              echo "Frontend is up"
+              docker rm -f smoke-test
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Frontend never came up"
+          docker logs smoke-test
+          exit 1
+
+      - name: Set up SSH
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sshpass
+          mkdir -p ~/.ssh
+          cat > ~/.ssh/config <<EOF
+          Host server
+            HostName ${{ secrets.SERVER_HOST }}
+            Port ${{ secrets.SERVER_PORT }}
+            User ${{ secrets.SERVER_USER }}
+            StrictHostKeyChecking accept-new
+            PreferredAuthentications password
+            PubkeyAuthentication no
+          EOF
+
+      - name: Test the connection
+        run: sshpass -e ssh server "hostname && sudo docker version --format 'Docker {{.Server.Version}}'"
+
+      - name: Send the image to the server
+        run: |
+          set -o pipefail
+          docker save "$IMAGE" | gzip | sshpass -e ssh server "gunzip | sudo docker load"
+
+      - name: Start the new container
+        run: |
+          sshpass -e ssh server "sudo docker rm -f $APP_NAME || true"
+          sshpass -e ssh server "sudo docker run -d \
+            --name $APP_NAME \
+            --restart unless-stopped \
+            -p 127.0.0.1:$HOST_PORT:80 \
+            $IMAGE"
+
+      - name: Check the app is up
+        run: |
+          for _ in $(seq 1 20); do
+            if sshpass -e ssh server "curl -fsS http://127.0.0.1:$HOST_PORT/ >/dev/null"; then
+              echo "Deployed and serving"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "Frontend did not come up. Last logs:"
+          sshpass -e ssh server "sudo docker logs --tail 100 $APP_NAME"
+          exit 1
+
+      # Every deploy loads a new image tagged by commit; keep the disk from filling.
+      - name: Remove old images
+        run: |
+          sshpass -e ssh server "sudo docker images paperless-factory-frontend --format '{{.Repository}}:{{.Tag}}' \
+            | grep -v ':${{ github.sha }}$' | xargs -r sudo docker rmi || true"

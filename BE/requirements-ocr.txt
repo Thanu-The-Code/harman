@@ -1,0 +1,12 @@
+# Optional: reading PDFs and images (scans, photos) into templates and records.
+# Install on top of requirements.txt:  pip install -r requirements-ocr.txt
+# Without it the OCR service offers Excel only (GET /api/ocr/formats says so).
+#
+# paddlepaddle 3.2+ crashes with oneDNN on Windows CPU; 3.1.1 runs ~5x faster
+# than with oneDNN switched off.
+paddlepaddle==3.1.1
+paddleocr==3.7.0
+# paddlex requires the contrib build; do not also install opencv-python(-headless).
+opencv-contrib-python==4.10.0.84
+# The first OCR request downloads the PP-OCRv5 mobile models (~20 MB) to
+# %USERPROFILE%\.paddlex (Windows) / ~/.paddlex.

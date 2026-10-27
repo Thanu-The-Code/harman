@@ -1,0 +1,210 @@
+// Table form element
+.rfb-table {
+  margin-bottom: 0;
+
+  th {
+    background: #f5f6f8;
+    font-weight: 600;
+  }
+
+  .rfb-table-static {
+    background: #fafafa;
+  }
+}
+
+.rfb-table {
+  .rfb-table-static {
+    white-space: pre-line;
+    font-size: 0.85em;
+    min-width: 70px;
+  }
+
+  .rfb-input-cell {
+    min-width: 46px;
+    padding: 2px;
+  }
+
+  th {
+    white-space: pre-line;
+    text-align: center;
+    vertical-align: middle;
+  }
+}
+
+.rfb-table-wide {
+  font-size: 0.8em;
+
+  .rfb-input-cell input {
+    min-width: 38px;
+    padding: 0 2px;
+  }
+}
+
+.rfb-check-cell {
+  width: 100%;
+  min-width: 34px;
+  height: 30px;
+  border: 1px solid #ced4da;
+  border-radius: 3px;
+  background: #fff;
+  font-weight: 700;
+  line-height: 1;
+
+  &.is-ok {
+    color: #1e7e34;
+    background: #e9f7ec;
+  }
+
+  &.is-not-ok {
+    color: #bd2130;
+    background: #fbeaec;
+  }
+}
+
+.table-editor {
+  .te-grid {
+    max-height: 420px;
+    overflow: auto;
+  }
+
+  .te-cell {
+    min-width: 60px;
+    padding: 2px;
+    cursor: pointer;
+
+    textarea {
+      min-width: 70px;
+      resize: vertical;
+      font-size: 0.85em;
+    }
+  }
+
+  .te-input {
+    background: #f8f9fa;
+    text-align: center;
+  }
+
+  .te-active {
+    outline: 2px solid #007bff;
+    outline-offset: -2px;
+  }
+}
+
+// OCR dialogs (rendered above the preview modals)
+.ocr-modal {
+  z-index: 1060;
+  background: rgba(0, 0, 0, 0.4);
+  overflow-y: auto;
+
+  .modal-content {
+    max-height: none;
+  }
+}
+
+.ocr-page {
+  position: relative;
+  width: 100%;
+  border: 1px solid #d0d4da;
+  background: #fff;
+  overflow: hidden;
+
+  .ocr-page-inner {
+    position: absolute;
+    inset: 0;
+  }
+
+  .ocr-page-image {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+  }
+}
+
+.ocr-box,
+.ocr-text,
+.ocr-cell {
+  position: absolute;
+  box-sizing: border-box;
+}
+
+.ocr-box-line {
+  border: 1px solid rgba(0, 102, 204, 0.8);
+  background: rgba(0, 102, 204, 0.08);
+}
+
+.ocr-box-line.ocr-low {
+  border-color: rgba(220, 53, 69, 0.9);
+  background: rgba(220, 53, 69, 0.12);
+}
+
+.ocr-box-check {
+  border: 2px solid rgba(108, 117, 125, 0.9);
+
+  &.is-checked {
+    border-color: #28a745;
+    background: rgba(40, 167, 69, 0.25);
+    color: #28a745;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  &.is-radio {
+    border-radius: 50%;
+  }
+}
+
+.ocr-box-table {
+  border: 2px dashed rgba(255, 140, 0, 0.9);
+}
+
+.ocr-page-digital {
+  .ocr-cell {
+    border: 1px solid #adb5bd;
+  }
+
+  .ocr-box-table {
+    border: 1px solid #6c757d;
+  }
+
+  .ocr-text {
+    white-space: nowrap;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    color: #212529;
+    font-family: Arial, Helvetica, sans-serif;
+  }
+
+  // Spreadsheet cells: text boxes are whole cells, so wrap inside them like Excel does.
+  &.ocr-page-sheet .ocr-text {
+    white-space: pre-wrap;
+    overflow: hidden;
+    word-break: break-word;
+    line-height: 1.15;
+    padding: 0 2px;
+  }
+}
+
+.ocr-plain-text {
+  max-height: 600px;
+  overflow: auto;
+  padding: 12px;
+  background: #f8f9fa;
+  border: 1px solid #dee2e6;
+  white-space: pre-wrap;
+}
+
+.ocr-legend {
+  position: relative;
+  display: inline-block;
+  width: 14px;
+  height: 10px;
+  margin: 0 4px 0 12px;
+  vertical-align: middle;
+}
+
+.ocr-review td {
+  vertical-align: middle;
+}

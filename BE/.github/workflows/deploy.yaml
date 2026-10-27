@@ -1,0 +1,230 @@
+name: Deploy Paperless Factory backend
+
+on:
+  push:
+    branches:
+      - harman-dev
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  APP_NAME: paperless-factory-backend
+  HOST_PORT: "8021"
+  SERVER_APP_DIR: /home/ubuntu/paperless-factory
+  # Created by the postgres docker-compose.yaml on the server
+  DB_NETWORK: paperless-net
+  IMAGE: paperless-factory-backend:${{ github.sha }}
+
+jobs:
+  test:
+    name: Run tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get the code
+        uses: actions/checkout@v4
+
+      - name: Install Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install system tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libmagic1
+
+      - name: Install Python packages
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run the tests
+        run: pytest -q
+
+  # The unit tests use SQLite; production runs PostgreSQL, which returns
+  # timezone-aware datetimes and rejects some SQLite-only habits. This job runs
+  # the whole record process and every frontend request against a real
+  # PostgreSQL (INTEGRATION_PLAN.md B6 / step 9.2).
+  postgres-e2e:
+    name: End-to-end on PostgreSQL
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: e2e
+          POSTGRES_USER: e2e
+          POSTGRES_PASSWORD: e2e
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U e2e" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg://e2e:e2e@127.0.0.1:5432/e2e
+      AUTHENTICATION_ENABLED: "true"
+      ENVIRONMENT: development
+      SECRET_KEY: e2e-not-a-secret
+      DOCUMENT_MANAGER_ENV_FILE: ""
+      PYTHONIOENCODING: utf-8
+    steps:
+      - name: Get the code
+        uses: actions/checkout@v4
+
+      - name: Install Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install system tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libmagic1
+
+      - name: Install Python packages
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Create and seed the database
+        run: |
+          python cli.py init
+          python scripts/seed_quality_records.py
+
+      - name: Start the API
+        run: |
+          nohup python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 > api.log 2>&1 &
+          for _ in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:8000/api/health/simple && exit 0
+            sleep 2
+          done
+          cat api.log
+          exit 1
+
+      - name: Record process end to end
+        run: python scripts/validate_workflow.py --url http://127.0.0.1:8000
+
+      - name: Every frontend request end to end
+        run: python scripts/check_frontend_contract.py http://127.0.0.1:8000
+
+      - name: API log on failure
+        if: failure()
+        run: tail -200 api.log
+
+  # Build and deploy are one job so the image goes straight from this runner to
+  # the server without being stored as a GitHub artifact.
+  deploy:
+    name: Build and deploy
+    runs-on: ubuntu-latest
+    needs: [test, postgres-e2e]
+    env:
+      SSHPASS: ${{ secrets.SERVER_PASSWORD }}
+    steps:
+      - name: Get the code
+        uses: actions/checkout@v4
+
+      - name: Build the image
+        run: docker build -t "$IMAGE" .
+
+      # Same shape as the server: postgres in its own container, the app
+      # joining its network and reaching it by container name.
+      - name: Start the image as a test
+        run: |
+          docker network create smoke-net
+          docker run -d --name smoke-db --network smoke-net \
+            -e POSTGRES_DB=smoke -e POSTGRES_USER=smoke -e POSTGRES_PASSWORD=smoke \
+            postgres:16-alpine
+          docker run -d --name smoke-test --network smoke-net -p 8000:8000 \
+            -e ENVIRONMENT=production \
+            -e SECRET_KEY="$(openssl rand -hex 32)" \
+            -e DATABASE_URL=postgresql+psycopg://smoke:smoke@smoke-db:5432/smoke \
+            "$IMAGE"
+
+      - name: Wait until the app answers
+        run: |
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8000/health; then
+              echo "App is up"
+              docker rm -f smoke-test smoke-db
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "App never came up"
+          docker logs smoke-test
+          exit 1
+
+      - name: Set up SSH
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sshpass
+          mkdir -p ~/.ssh
+          cat > ~/.ssh/config <<EOF
+          Host server
+            HostName ${{ secrets.SERVER_HOST }}
+            Port ${{ secrets.SERVER_PORT }}
+            User ${{ secrets.SERVER_USER }}
+            StrictHostKeyChecking accept-new
+            PreferredAuthentications password
+            PubkeyAuthentication no
+          EOF
+
+      - name: Test the connection
+        run: sshpass -e ssh server "hostname && sudo docker version --format 'Docker {{.Server.Version}}'"
+
+      - name: Check .env and the database are on the server
+        run: |
+          if ! sshpass -e ssh server "sudo test -f $SERVER_APP_DIR/.env"; then
+            echo "ERROR: $SERVER_APP_DIR/.env not found. Create it on the server first."
+            exit 1
+          fi
+          sshpass -e ssh server "sudo chmod 600 $SERVER_APP_DIR/.env"
+          if ! sshpass -e ssh server "sudo docker network inspect $DB_NETWORK >/dev/null"; then
+            echo "ERROR: network $DB_NETWORK not found. Start postgres first: cd $SERVER_APP_DIR && docker compose up -d"
+            exit 1
+          fi
+
+      - name: Prepare the data folder
+        run: |
+          sshpass -e ssh server "sudo mkdir -p $SERVER_APP_DIR/data"
+          sshpass -e ssh server "sudo chown -R 1000:1000 $SERVER_APP_DIR/data"
+
+      - name: Send the image to the server
+        run: |
+          set -o pipefail
+          docker save "$IMAGE" | gzip | sshpass -e ssh server "gunzip | sudo docker load"
+
+      # Only the app container is replaced; postgres keeps running.
+      - name: Start the new container
+        run: |
+          sshpass -e ssh server "sudo docker rm -f $APP_NAME || true"
+          sshpass -e ssh server "sudo docker run -d \
+            --name $APP_NAME \
+            --restart unless-stopped \
+            --network $DB_NETWORK \
+            -p 127.0.0.1:$HOST_PORT:8000 \
+            --env-file $SERVER_APP_DIR/.env \
+            -v $SERVER_APP_DIR/data:/app/data \
+            $IMAGE"
+
+      - name: Check the app is healthy
+        run: |
+          for _ in $(seq 1 30); do
+            if sshpass -e ssh server "curl -fsS http://127.0.0.1:$HOST_PORT/health"; then
+              echo "Deployed and healthy"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "App did not come up. Last logs:"
+          sshpass -e ssh server "sudo docker logs --tail 100 $APP_NAME"
+          exit 1
+
+      # Every deploy loads a new image tagged by commit; keep the disk from filling.
+      - name: Remove old images
+        run: |
+          sshpass -e ssh server "sudo docker images paperless-factory-backend --format '{{.Repository}}:{{.Tag}}' \
+            | grep -v ':${{ github.sha }}$' | xargs -r sudo docker rmi || true"

@@ -1,0 +1,55 @@
+{
+  "_readme": [
+    "How a scanned sheet is read. Edit THIS file to change the OCR engine or tune it.",
+    "Precedence (lowest -> highest): code defaults < this file < environment variables < database settings table.",
+    "After editing, either restart the app, or run:  python cli.py sync-model-config",
+    "That command pushes these values into the database settings table so they win over stale DB rows."
+  ],
+  "ocr": {
+    "_readme": [
+      "engine: 'auto' | 'paddle' | 'tesseract'",
+      "auto     = a PDF's own text layer first, then PaddleOCR, then Tesseract",
+      "paddle   = force PaddleOCR (falls back to Tesseract on hard failure)",
+      "tesseract= classic local OCR only, never calls PaddleOCR",
+      "",
+      "Every engine here runs on this machine. A quality record is never sent to a",
+      "hosted service to be read, which is the point: a plant that will not let its",
+      "inspection sheets leave the building can still have them read.",
+      "",
+      "PaddleOCR is the accurate one and the only engine that keeps the document's",
+      "structure - tables stay tables, so a filled format still looks like the format.",
+      "It is an optional dependency:  pip install -r requirements-ocr.txt",
+      "Models download on first use (about 200 MB) and are cached in ~/.paddleocr."
+    ],
+    "engine": "auto",
+    "pdf_text_layer_first": true,
+    "paddle": {
+      "enabled": true,
+      "lang": "en",
+      "layout_analysis": true,
+      "table_recognition": true,
+      "use_gpu": false,
+      "dpi": 300,
+      "max_pages": 30,
+      "correct_orientation": true,
+      "flatten_curled_pages": false,
+      "_readme": [
+        "table_recognition: recover each table from where the recognised words sit",
+        "on the page. The text detector already reports every line's box, so this",
+        "costs nothing and is enough for a ruled form like an inspection sheet.",
+        "",
+        "table_model: use PaddleOCR's own table pipeline instead, which detects",
+        "cells with two RT-DETR models. More accurate on a wildly irregular table.",
+        "On a CPU it took over ten minutes for a single page - switch it on only",
+        "with a GPU (use_gpu) and a reason.",
+        "",
+        "models: 'mobile' or 'server'. The server pair is more accurate on a",
+        "difficult scan and about ten times slower on a CPU - 225 seconds for one",
+        "inspection sheet here, against seconds for mobile. Use server with a GPU."
+      ],
+      "table_model": false,
+      "models": "mobile",
+      "detection_side_length": 960
+    }
+  }
+}

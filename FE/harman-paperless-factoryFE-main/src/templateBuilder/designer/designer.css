@@ -1,0 +1,1075 @@
+/*
+ * The template designer (Figma: Template builder / Document create).
+ *
+ * The form builder is written for a page with Bootstrap 4 and Font Awesome; this app
+ * has neither, so the classes its elements use are restated below, scoped to
+ * `.rfb-scope` (the designer page and its dialogs) so nothing leaks into MUI.
+ */
+
+/* index.css puts Geologica on every element with !important; icons need their own font */
+.fa,
+.fas,
+.fa-solid {
+  font-family: "Font Awesome 6 Free" !important;
+  font-weight: 900;
+}
+.far,
+.fa-regular {
+  font-family: "Font Awesome 6 Free" !important;
+  font-weight: 400;
+}
+.fab,
+.fa-brands {
+  font-family: "Font Awesome 6 Brands" !important;
+  font-weight: 400;
+}
+
+/* ------------------------------------------------------------------ the page */
+
+.designer-page {
+  --teal: #14b8a6;
+  --teal-dark: #0f766e;
+  --teal-soft: #e6f7f5;
+  --line: #e5e7eb;
+  --muted: #6b7280;
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - 80px);
+}
+
+.designer-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.designer-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.designer-title h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+  color: #111827;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 46vw;
+}
+.designer-title .back-btn {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  width: 34px;
+  height: 34px;
+}
+.designer-title .edit-details-btn {
+  text-transform: none;
+  font-size: 14px;
+  color: var(--teal-dark);
+  background: var(--teal-soft);
+  padding: 2px 10px;
+  min-width: 0;
+}
+.designer-title .code-chip {
+  font-size: 12px;
+}
+.designer-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.designer-actions .MuiButton-root {
+  text-transform: none;
+  font-weight: 600;
+  font-size: 14px;
+  box-shadow: none;
+  padding: 6px 16px;
+}
+.designer-actions .btn-soft {
+  color: var(--teal-dark);
+  background: var(--teal-soft);
+}
+.designer-actions .btn-soft:hover {
+  background: #d1f0ec;
+}
+.designer-actions .btn-primary {
+  background: var(--teal);
+  color: #fff;
+}
+.designer-actions .btn-primary:hover {
+  background: #0f9e8e;
+}
+.designer-actions .preview-btn {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+
+/* ------------------------------------------------------------------ the text toolbar */
+
+.text-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px 8px 0 0;
+  flex-wrap: wrap;
+}
+.text-toolbar .tt-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.text-toolbar .tt-btn {
+  border-radius: 4px;
+  color: #4b5563;
+}
+.text-toolbar .tt-active .tt-btn {
+  background: var(--teal-soft);
+  color: var(--teal-dark);
+}
+.text-toolbar .tt-sep {
+  width: 1px;
+  height: 22px;
+  background: var(--line);
+  margin: 0 6px;
+}
+.text-toolbar .tt-style {
+  min-width: 130px;
+  height: 32px;
+  font-size: 13px;
+}
+.text-toolbar .tt-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.text-toolbar .tt-zoom {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.text-toolbar .tt-zoom-value {
+  min-width: 34px;
+  text-align: center;
+  font-size: 14px;
+  color: #374151;
+}
+.text-toolbar .tt-settings {
+  border: 0;
+  border-radius: 6px;
+  padding: 6px 12px;
+  background: var(--teal-soft);
+  color: var(--teal-dark);
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+}
+.text-toolbar .tt-settings:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ------------------------------------------------------------------ canvas + side panel */
+
+.designer-workspace {
+  display: flex;
+  align-items: stretch;
+  flex: 1;
+  min-height: 640px;
+  border: 1px solid var(--line);
+  border-top: 0;
+  border-radius: 0 0 8px 8px;
+  overflow: hidden;
+  background: #fff;
+}
+.designer-canvas {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: auto;
+  padding: 24px;
+  background: #f6f8f8;
+}
+.designer-sheet {
+  max-width: 980px;
+  margin: 0 auto;
+}
+/* the page itself: white, dotted like the Figma canvas */
+.designer-sheet .react-form-builder-preview.designer-preview {
+  float: none;
+  width: 100%;
+  min-height: 720px;
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: none;
+  background-color: #fff;
+  background-image: radial-gradient(#dde3e3 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+.designer-sheet .Sortable .rfb-item {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px dashed transparent !important;
+  border-radius: 6px;
+  margin-bottom: 6px !important;
+  padding: 10px 16px !important;
+}
+.designer-sheet .Sortable .rfb-item:hover {
+  border-color: #b9e6e0 !important;
+  box-shadow: none;
+}
+/* a field in a row's column is given the column's full width: its padding stays inside it */
+.designer-sheet .rfb-child > .rfb-item {
+  box-sizing: border-box;
+  margin-bottom: 0 !important;
+}
+/* a row's own buttons get a strip above its columns, clear of the last column's buttons */
+.designer-sheet .rfb-card[data-element$="ColumnRow"] > div > .rfb-item {
+  padding-top: 30px !important;
+}
+.designer-sheet .rfb-card[data-element$="ColumnRow"] > div > .rfb-item > div > .toolbar-header .toolbar-header-buttons {
+  margin-top: -26px !important;
+}
+/* the builder's element-type badge sits on the field's own label; the Figma page has none */
+.designer-sheet .toolbar-header .badge {
+  display: none;
+}
+/* the element whose properties are open is outlined by DesignerCanvas (by its data-id) */
+.designer-sheet .toolbar-header .toolbar-header-buttons {
+  display: flex;
+  gap: 4px;
+  margin-top: -6px !important;
+  right: 0 !important;
+}
+.designer-sheet .toolbar-header .btn {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 6px;
+  background: #fff;
+  border: 1px solid var(--line);
+  color: #4b5563;
+  font-size: 12px;
+}
+.designer-sheet .form-place-holder {
+  margin: 0;
+  padding: 40px 24px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 6px;
+  font-size: 0; /* the builder's own word ("Dropzone") is replaced by the line below */
+  background: rgba(255, 255, 255, 0.7);
+}
+.designer-sheet .form-place-holder::after {
+  content: "Click a field in Add Fields, or drag it here, to start the form";
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--muted);
+}
+/* the drop target after the last field: only a thin line until something is dragged over it */
+.designer-sheet .form-place-holder-hidden {
+  min-height: 40px;
+}
+
+
+.designer-panel {
+  flex: 0 0 304px;
+  /* a wide table in Field Properties must not widen the panel (it squeezed the page to nothing) */
+  min-width: 0;
+  max-width: 304px;
+  border-left: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  min-height: 0;
+}
+.designer-panel .panel-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--line);
+}
+.designer-panel .panel-tabs button {
+  flex: 1;
+  border: 0;
+  background: none;
+  padding: 12px 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+}
+.designer-panel .panel-tabs button.active {
+  color: var(--teal);
+  border-bottom-color: var(--teal);
+}
+.designer-panel .panel-body {
+  overflow-y: auto;
+  overflow-x: hidden;
+  flex: 1;
+  max-height: calc(100vh - 230px);
+  padding: 4px 16px 16px;
+}
+.designer-panel .panel-body[hidden] {
+  display: none;
+}
+.designer-panel .panel-empty {
+  color: var(--muted);
+  font-size: 13px;
+  padding: 16px 0;
+}
+
+/* the palette: tiles in collapsible groups */
+.rfb-tiles .rfb-tile-section {
+  border-bottom: 1px solid var(--line);
+  padding: 10px 0 14px;
+}
+.rfb-tiles .rfb-tile-section-head {
+  display: flex;
+  width: 100%;
+  justify-content: space-between;
+  align-items: center;
+  border: 0;
+  background: none;
+  padding: 4px 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #111827;
+  cursor: pointer;
+}
+.rfb-tiles .rfb-tile-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.rfb-tiles .rfb-tile-grid li {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 74px;
+  padding: 8px 4px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  font-size: 11px;
+  line-height: 1.2;
+  text-align: center;
+  color: #374151;
+  cursor: grab !important;
+  user-select: none;
+}
+.rfb-tiles .rfb-tile-grid li:hover {
+  border-color: var(--teal);
+  background: var(--teal-soft);
+  color: var(--teal-dark);
+}
+.rfb-tiles .rfb-tile-icon {
+  display: inline-flex;
+  color: #4b5563;
+}
+.rfb-tiles .rfb-tile-grid li:hover .rfb-tile-icon {
+  color: var(--teal-dark);
+}
+
+/* ------------------------------------------------------------------ field properties */
+
+.field-properties {
+  font-size: 13px;
+  color: #111827;
+}
+.field-properties .fp-head {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  border: 0;
+  background: none;
+  padding: 12px 0;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.field-properties .fp-section {
+  border-top: 1px solid var(--line);
+  padding: 12px 0;
+}
+.field-properties .fp-section-title {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.field-properties .fp-field {
+  margin-bottom: 12px;
+}
+.field-properties .fp-label {
+  font-size: 12px;
+  color: #374151;
+  margin-bottom: 6px;
+}
+.fp-required {
+  color: #ef4444;
+}
+.field-properties .fp-hint {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+.field-properties .MuiOutlinedInput-root {
+  background: #f9fafb;
+  font-size: 13px;
+}
+.field-properties .fp-switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.field-properties .fp-switch-row .fp-label {
+  margin: 0;
+}
+.field-properties .MuiSwitch-switchBase.Mui-checked {
+  color: #fff;
+}
+.field-properties .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track {
+  background: var(--teal-dark);
+  opacity: 1;
+}
+.field-properties .fp-options {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+}
+.field-properties .fp-options li {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.field-properties .fp-option-grip {
+  color: #9ca3af;
+}
+.field-properties .fp-option-text {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #f9fafb;
+}
+.field-properties .fp-option-text span:last-child,
+.field-properties .fp-option-text input {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 0;
+  background: none;
+  font: inherit;
+  width: 100%;
+  outline: none;
+}
+.field-properties .fp-dot {
+  flex: 0 0 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.field-properties .fp-icon-btn {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+}
+.field-properties .fp-option-add {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 24px;
+}
+.field-properties .fp-option-add input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #f9fafb;
+  font: inherit;
+}
+.field-properties .fp-add-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border: 0;
+  background: none;
+  color: var(--teal);
+  font-weight: 600;
+  cursor: pointer;
+}
+.field-properties .fp-add-btn:disabled {
+  opacity: 0.5;
+}
+.field-properties .fp-limits {
+  display: grid;
+  grid-template-columns: 1fr 1fr 0.8fr;
+  gap: 6px;
+}
+.field-properties .fp-footer {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+  text-align: right;
+}
+.field-properties .fp-done {
+  border: 0;
+  border-radius: 6px;
+  padding: 6px 16px;
+  background: var(--teal-soft);
+  color: var(--teal-dark);
+  font-weight: 600;
+  cursor: pointer;
+}
+.rich-text-editor {
+  min-height: 90px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #f9fafb;
+  outline: none;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.rich-text-editor:focus {
+  border-color: var(--teal);
+  background: #fff;
+}
+.rich-text-editor h1,
+.rich-text-editor h2,
+.rich-text-editor h3 {
+  margin: 0 0 6px;
+}
+.rich-text-editor blockquote {
+  margin: 0;
+  padding-left: 10px;
+  border-left: 3px solid var(--line);
+  color: #4b5563;
+}
+
+/* the table editor (vendor table-editor.jsx) inside Field Properties */
+.fp-table-editor .table-editor > .control-label {
+  display: none; /* the section is already titled "Table layout" */
+}
+.fp-table-editor .te-toolbar,
+.fp-table-editor .te-rules {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+.fp-table-editor .te-rule {
+  width: 70px !important;
+}
+.fp-table-editor .te-required {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  margin: 0;
+}
+.fp-table-editor .te-grid {
+  max-height: 320px;
+  overflow: auto;
+  margin: 6px 0;
+}
+.fp-table-editor .te-grid textarea {
+  min-width: 70px;
+  resize: vertical;
+}
+
+/* ------------------------------------------------------------------ other steps and states */
+
+.designer-readonly,
+.process-step {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px;
+}
+.process-step {
+  background: none;
+  border: 0;
+  padding: 0;
+}
+.process-step .recorded-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  columns: 2;
+  font-size: 13px;
+}
+.process-step .recorded-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  break-inside: avoid;
+  padding: 4px 0;
+  border-bottom: 1px dashed var(--line);
+}
+
+/* ------------------------------------------------------------------ dialogs */
+
+.template-details-dialog .MuiDialog-paper,
+.upload-document-dialog .MuiDialog-paper,
+.designer-preview-dialog .MuiDialog-paper {
+  border-radius: 10px;
+}
+.tdd-head,
+.udd-head,
+.dpd-head {
+  padding: 18px 20px 12px;
+  border-bottom: 1px solid #e5e7eb;
+}
+.udd-head,
+.dpd-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+.tdd-head h2,
+.udd-head h2,
+.dpd-head h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #111827;
+}
+.tdd-head p,
+.udd-head p {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #6b7280;
+}
+.tdd-body {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) 1.25fr;
+  min-height: 380px;
+}
+.tdd-folders {
+  padding: 14px 16px;
+  border-right: 1px solid #e5e7eb;
+}
+.folder-tree,
+.folder-tree ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.folder-tree {
+  margin-top: 10px;
+  max-height: 290px;
+  overflow: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 6px 0;
+}
+.folder-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px 3px 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.folder-row:hover {
+  background: #f3f4f6;
+}
+.folder-row.active {
+  background: #d9f3ef;
+}
+.folder-row .folder-toggle {
+  padding: 2px;
+}
+.folder-icon {
+  color: #f6b93b;
+}
+.folder-row .folder-name {
+  flex: 1;
+}
+.folder-row .folder-check {
+  color: #14b8a6;
+}
+.folder-empty {
+  padding: 10px;
+  font-size: 12px;
+  color: #6b7280;
+}
+.tdd-new-folder {
+  margin-top: 8px !important;
+  text-transform: none !important;
+  color: #0f766e !important;
+}
+.tdd-new-folder-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+.tdd-form {
+  padding: 14px 20px;
+}
+.tdd-label {
+  font-size: 12px;
+  color: #374151;
+  margin: 10px 0 6px;
+}
+.tdd-label:first-child {
+  margin-top: 0;
+}
+.tdd-path {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #f9fafb;
+  font-size: 13px;
+}
+.tdd-path span {
+  flex: 1;
+}
+.tdd-clear {
+  border: 0;
+  background: none;
+  color: #6b7280;
+  cursor: pointer;
+  font-size: 12px;
+}
+.tdd-row {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 12px;
+}
+.tdd-form .MuiOutlinedInput-root {
+  background: #f9fafb;
+  font-size: 13px;
+}
+.tdd-foot,
+.udd-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 20px;
+  border-top: 1px solid #e5e7eb;
+}
+.tdd-foot .MuiButton-root,
+.udd-foot .MuiButton-root {
+  text-transform: none;
+  font-weight: 600;
+  min-width: 100px;
+  box-shadow: none;
+}
+.tdd-cancel,
+.udd-cancel {
+  color: #374151 !important;
+  border: 1px solid #e5e7eb !important;
+}
+.tdd-submit,
+.udd-primary {
+  background: #14b8a6 !important;
+  color: #fff !important;
+}
+.tdd-submit.Mui-disabled,
+.udd-primary.Mui-disabled {
+  opacity: 0.5;
+}
+
+.udd-drop {
+  margin: 16px 20px;
+  padding: 26px;
+  border: 2px dashed #cbd5e1;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+  font-size: 13px;
+  color: #374151;
+}
+.udd-drop.over {
+  border-color: #14b8a6;
+  background: #f0fdfa;
+}
+.udd-drop-icon {
+  color: #14b8a6;
+  font-size: 36px !important;
+}
+.udd-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.udd-formats {
+  font-size: 12px;
+  color: #6b7280;
+}
+.udd-note {
+  margin-top: 4px;
+  color: #92400e;
+}
+.udd-progress,
+.udd-error {
+  margin: 0 20px 12px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.udd-progress {
+  background: #eff6ff;
+  color: #1e40af;
+}
+.udd-error {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+.udd-result {
+  padding: 14px 20px;
+}
+.udd-summary {
+  font-size: 13px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: #f0fdfa;
+  color: #0f766e;
+  margin-bottom: 12px;
+}
+.udd-preview {
+  max-height: 62vh;
+  overflow: auto;
+}
+.dpd-body {
+  padding: 16px 20px;
+  max-height: 75vh;
+  overflow: auto;
+}
+.dpd-body .btn-toolbar {
+  display: none;
+}
+
+/* ------------------------------------------------------------------ the builder's Bootstrap classes */
+
+.rfb-scope .form-group {
+  margin-bottom: 10px;
+}
+.rfb-scope .form-label,
+.rfb-scope .control-label,
+.rfb-scope .rfb-item label {
+  display: inline-block;
+  margin-bottom: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #374151;
+}
+.rfb-scope .form-control {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #111827;
+  background: #fff;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+}
+.rfb-scope .form-control-sm {
+  padding: 3px 6px;
+  font-size: 12px;
+}
+.rfb-scope .form-control:focus {
+  outline: none;
+  border-color: #14b8a6;
+  box-shadow: 0 0 0 2px rgba(20, 184, 166, 0.15);
+}
+.rfb-scope .badge {
+  display: inline-block;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: #334155;
+}
+.rfb-scope .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #fff;
+  color: #374151;
+  cursor: pointer;
+}
+.rfb-scope .btn:hover {
+  background: #f3f4f6;
+}
+.rfb-scope .btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.rfb-scope .btn-secondary,
+.rfb-scope .btn-success,
+.rfb-scope .btn-primary {
+  background: #14b8a6;
+  border-color: #14b8a6;
+  color: #fff;
+}
+.rfb-scope .btn-group {
+  display: inline-flex;
+  gap: 4px;
+}
+.rfb-scope .table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.rfb-scope .table th,
+.rfb-scope .table td {
+  border: 1px solid #d1d5db;
+  padding: 4px 6px;
+}
+.rfb-scope .table-responsive {
+  overflow-x: auto;
+}
+.rfb-scope .row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.rfb-scope .row > [class*="col"] {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.rfb-scope .custom-control,
+.rfb-scope .form-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.rfb-scope .help-block,
+.rfb-scope .text-muted,
+.rfb-scope .form-text {
+  font-size: 12px;
+  color: #6b7280;
+}
+.rfb-scope .d-flex {
+  display: flex;
+}
+.rfb-scope .align-items-center {
+  align-items: center;
+}
+.rfb-scope .flex-wrap {
+  flex-wrap: wrap;
+}
+.rfb-scope .mr-1 {
+  margin-right: 4px;
+}
+.rfb-scope .mr-2,
+.rfb-scope .mr-3 {
+  margin-right: 8px;
+}
+.rfb-scope .mb-1 {
+  margin-bottom: 4px;
+}
+.rfb-scope .mb-2 {
+  margin-bottom: 8px;
+}
+.rfb-scope .w-auto {
+  width: auto !important;
+}
+.rfb-scope .d-inline-block {
+  display: inline-block;
+}
+.rfb-scope .clearfix::after {
+  content: "";
+  display: table;
+  clear: both;
+}
+.rfb-scope .float-left {
+  float: left;
+}
+.rfb-scope .float-right {
+  float: right;
+}
+.rfb-scope h3.static {
+  margin: 0;
+  font-size: 20px;
+}
+.rfb-scope p.static {
+  margin: 0;
+}
+
+/* Field Properties -> Table layout: the size, and the large editor */
+.fp-table-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: #374151;
+}
+.fp-table-summary .MuiButton-root {
+  text-transform: none;
+  color: #0f766e;
+  flex-shrink: 0;
+}
+.fp-table-editor {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.ted-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 16px 20px 10px;
+  border-bottom: 1px solid #e5e7eb;
+}
+.ted-head h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.ted-head p {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #6b7280;
+}
+.ted-body {
+  padding: 14px 20px 20px;
+}
+.ted-body .te-grid {
+  max-height: 66vh !important;
+}
+.table-editor-dialog .MuiDialog-paper {
+  border-radius: 10px;
+}

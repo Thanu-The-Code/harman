@@ -1,0 +1,1145 @@
+"""
+The approval engine.
+
+Everything that changes a workflow's state goes through this module. Nothing
+else moves a step from `current` to `approved`, decides who is next, or marks a
+workflow finished. Routers validate input and render output; the rules live
+here, once.
+
+The model is deliberately small. A workflow is an ordered chain of steps, and
+exactly one of them is `current`. That single invariant answers every question
+the product asks:
+
+    where is it now?      the current step
+    who is it with?       that step's assignees, or whoever holds its role
+    is it done?           there is no current step and none were rejected
+    can I act?            I am addressed by the current step, and I am permitted
+
+Two permissions are checked separately and mean different things:
+
+    can_approve   may act on a step at all
+    can_sign      may apply a signature to that approval
+
+A step that demands a signature cannot be satisfied by someone who may only
+approve. That is the point of having two flags rather than one.
+"""
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+from typing import Iterable, Optional
+
+from loguru import logger
+from sqlalchemy import or_, update
+from sqlalchemy.orm import Session, joinedload
+
+from ..models import (
+    ApprovalStep,
+    ApprovalWorkflow,
+    Document,
+    Signature,
+    StepDecision,
+    User,
+    WorkflowEvent,
+)
+
+# Statuses, named once so a typo cannot invent a new one.
+DRAFT, ACTIVE, APPROVED, REJECTED, CHANGES, CANCELLED, PUBLISHED = (
+    "draft", "active", "approved", "rejected", "changes_requested", "cancelled", "published"
+)
+PENDING, CURRENT = "pending", "current"
+
+# How many of a step's named people must agree.
+ANY_OF, ALL_OF = "any", "all"
+
+
+# A CFT member who has reviewed a record and does not agree with it. Recorded
+# as a decision in its own right rather than as a rejection, because the record
+# process has exactly one decision point - the final decision - and the joint
+# review feeds it. See `reopen_cft_review` and the QMS section below.
+OBJECTED = "objected"
+
+# What counts as having answered a step that waits for everybody.
+ANSWERED = {"approved", OBJECTED}
+
+
+def outstanding(step: ApprovalStep) -> list[User]:
+    """
+    Who still has to answer this step before it can close.
+
+    Empty for an "any" step: one decision closes it, so nobody is outstanding
+    once somebody has acted. Empty too for a step addressed to a role rather
+    than to named people, because there is no list of individuals to wait for.
+
+    An objection counts as an answer. On a CFT joint review a member who has
+    looked at the record and disagreed has done their part; the disagreement is
+    carried to the final decision rather than stopping the chain, which is what
+    "Final Decision require from CFT" asks for.
+    """
+    if step.approval_mode != ALL_OF or not step.assignees:
+        return []
+    answered = {d.user_id for d in (step.decisions or []) if d.action in ANSWERED}
+    return [a for a in step.assignees if a.id not in answered]
+
+
+def has_decided(step: ApprovalStep, user: User) -> bool:
+    """Has this person already answered on this step?"""
+    return any(d.user_id == user.id for d in (step.decisions or []))
+
+TERMINAL = {APPROVED, REJECTED, CANCELLED, PUBLISHED}
+
+PRIORITIES = ["low", "normal", "high", "urgent"]
+
+# How long a step has, in hours. The labels are what the UI offers.
+SLA_CHOICES = {
+    "4 hours": 4, "8 hours": 8, "1 day": 24, "2 days": 48,
+    "3 days": 72, "5 days": 120, "10 days": 240,
+}
+
+
+class WorkflowError(ValueError):
+    """The request is not allowed by the rules of the process."""
+
+
+# ---------------------------------------------------------------- building
+
+
+def create_workflow(
+    db: Session,
+    document: Document,
+    author: User,
+    *,
+    name: str = "Approval",
+    template_id: Optional[str] = None,
+    priority: str = "normal",
+    department: Optional[str] = None,
+    due_date: Optional[datetime] = None,
+    retention_policy: Optional[str] = None,
+    after_approval: Optional[str] = None,
+    notes: Optional[str] = None,
+    steps: Optional[list[dict]] = None,
+    start: bool = True,
+) -> ApprovalWorkflow:
+    """
+    Build a workflow for a document and, by default, start it.
+
+    Replaces any workflow already in flight for the same document: a document
+    has one live approval chain, never two competing ones.
+    """
+    steps = steps or []
+    if not steps:
+        raise WorkflowError("An approval process needs at least one step.")
+    if priority not in PRIORITIES:
+        priority = "normal"
+
+    existing = active_for_document(db, document.id)
+    if existing:
+        cancel_workflow(db, existing, author, reason="Replaced by a new approval process")
+
+    workflow = ApprovalWorkflow(
+        document_id=document.id,
+        name=(name or "Approval").strip()[:120],
+        template_id=template_id,
+        status=DRAFT,
+        priority=priority,
+        created_by=author.id if author else None,
+        department=department,
+        due_date=due_date,
+        retention_policy=retention_policy,
+        after_approval=after_approval,
+        notes=notes,
+    )
+    db.add(workflow)
+    db.flush()
+
+    for index, raw in enumerate(steps):
+        db.add(_build_step(db, workflow, index, raw))
+
+    db.commit()
+    db.refresh(workflow)
+
+    if start:
+        start_workflow(db, workflow, author)
+
+    return workflow
+
+
+def _build_step(db: Session, workflow: ApprovalWorkflow, index: int, raw: dict) -> ApprovalStep:
+    requires_signature = bool(raw.get("requires_signature") or raw.get("sign"))
+
+    mode = (raw.get("approval_mode") or ANY_OF).strip().lower()
+    if mode not in (ANY_OF, ALL_OF):
+        mode = ANY_OF
+
+    step = ApprovalStep(
+        workflow_id=workflow.id,
+        order_index=index,
+        name=(raw.get("name") or f"Step {index + 1}").strip()[:120],
+        department=(raw.get("department") or raw.get("dept") or "").strip() or None,
+        role=(raw.get("role") or raw.get("who") or "").strip() or None,
+        requires_signature=requires_signature,
+        approval_mode=mode,
+        sla_hours=_sla_hours(raw.get("sla")),
+        # Set only when the chain was built from a QMS format. It is how the
+        # engine recognises the joint review and the final decision without
+        # matching on a step name somebody may have renamed.
+        qms_stage=(raw.get("qms_stage") or None),
+        status=PENDING,
+    )
+
+    # Named people, when the author chose specific individuals.
+    ids = raw.get("assignee_ids") or []
+    if ids:
+        people = db.query(User).filter(
+            User.id.in_(ids),
+            User.is_active.is_(True)
+        ).all()
+
+        # Preserve the exact order supplied in assignee_ids.
+        people_by_id = {person.id: person for person in people}
+        people = [people_by_id[user_id] for user_id in ids if user_id in people_by_id]
+
+        _reject_unsignable(people, step)
+        step.assignees = people
+
+    # "Everybody" only means something when there is a list of individuals.
+    # A step addressed to a role has no roll to call, so it falls back to the
+    # only thing it can do rather than waiting for a set that does not exist.
+    if step.approval_mode == ALL_OF and len(step.assignees or []) < 2:
+        step.approval_mode = ANY_OF
+
+    return step
+
+
+def _reject_unsignable(people: Iterable[User], step: ApprovalStep) -> None:
+    """
+    A step that must be signed cannot be handed to someone who cannot sign.
+
+    Caught here rather than at decision time so the author finds out while they
+    are still designing the process, not three days later when the document is
+    stuck with somebody who is not allowed to move it.
+    """
+    if not step.requires_signature:
+        return
+    blocked = [p.full_name or p.username for p in people if not (p.can_sign or p.is_admin)]
+    if blocked:
+        raise WorkflowError(
+            f"Step '{step.name}' requires a signature, but "
+            + ", ".join(blocked)
+            + (" is" if len(blocked) == 1 else " are")
+            + " not permitted to sign. Grant signature authority, choose someone "
+              "else, or turn the signature requirement off for this step."
+        )
+
+
+def _sla_hours(value) -> Optional[int]:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return int(value) or None
+    return SLA_CHOICES.get(str(value).strip(), None)
+
+
+# --------------------------------------------------------------- lifecycle
+
+
+def start_workflow(db: Session, workflow: ApprovalWorkflow, actor: Optional[User]) -> ApprovalWorkflow:
+    """Put the first step in play and stamp the deadlines."""
+    if workflow.status not in (DRAFT, CHANGES):
+        return workflow
+    if not workflow.steps:
+        raise WorkflowError("This process has no steps to start.")
+
+    now = datetime.utcnow()
+    workflow.status = ACTIVE
+    workflow.started_at = workflow.started_at or now
+
+    for step in workflow.steps:
+        if step.status in (PENDING, CURRENT):
+            step.status = PENDING
+
+    first = workflow.steps[0]
+    first.status = CURRENT
+    first.due_date = _due(now, first.sla_hours)
+
+    if not workflow.due_date:
+        total = sum(s.sla_hours or 24 for s in workflow.steps)
+        workflow.due_date = _due(now, total)
+
+    _event(db, workflow, None, actor, "started",
+           f"Approval started · {len(workflow.steps)} step"
+           f"{'' if len(workflow.steps) == 1 else 's'}")
+    db.commit()
+    db.refresh(workflow)
+    return workflow
+
+
+def _due(base: datetime, hours: Optional[int]) -> Optional[datetime]:
+    return base + timedelta(hours=hours) if hours else None
+
+
+def cancel_workflow(db: Session, workflow: ApprovalWorkflow, actor: Optional[User],
+                    reason: str = "") -> ApprovalWorkflow:
+    if workflow.status in (APPROVED, PUBLISHED):
+        raise WorkflowError("A completed approval cannot be cancelled.")
+    workflow.status = CANCELLED
+    workflow.completed_at = datetime.utcnow()
+    for step in workflow.steps:
+        if step.status in (PENDING, CURRENT):
+            step.status = "skipped"
+
+    document = db.query(Document).filter(Document.id == workflow.document_id).first()
+    if document:
+        document.is_approved = False
+        document.approved_at = None
+        document.approved_by = None
+
+    _event(db, workflow, None, actor, "cancelled", reason or "Approval cancelled")
+    db.commit()
+    return workflow
+
+
+# ---------------------------------------------------------------- deciding
+
+
+def can_act(user: User, step: ApprovalStep) -> tuple[bool, str]:
+    """
+    May this user decide this step, and if not, why not?
+
+    Returns a reason rather than a bare False so the interface can say what is
+    wrong instead of just disabling a button.
+    """
+    if step.status != CURRENT:
+        return False, "This step is not the one waiting for a decision."
+
+    # Nobody answers twice, administrators included. On a step that needs
+    # everybody, a second approval from the same person would count towards
+    # the total and let one signatory close a step meant for three.
+    if has_decided(step, user):
+        return False, "You have already given your decision on this step."
+
+    # A named assignee is a deliberate delegation, including for administrators.
+    # Admin rights must not let an admin approve or sign in place of another
+    # person who was explicitly named on the step.
+    if step.assignees and not any(a.id == user.id for a in step.assignees):
+        names = ", ".join(a.full_name or a.username for a in step.assignees)
+        return False, f"This step is assigned to {names}."
+
+    if user.is_admin:
+        return True, ""
+
+    if not (user.can_approve or user.has_permission("documents.approve")):
+        return False, "You do not have permission to approve documents."
+
+    if not step.assignees and step.department and user.department and step.department != user.department:
+        return False, f"This step is for the {step.department} department."
+
+    if step.requires_signature and not user.can_sign:
+        return False, ("This step must be signed, and you are not permitted to "
+                       "apply a signature. Ask an administrator for signature authority.")
+
+    return True, ""
+
+
+def decide(
+    db: Session,
+    workflow: ApprovalWorkflow,
+    step: ApprovalStep,
+    user: User,
+    action: str,
+    *,
+    comment: str = "",
+    reason: str = "",
+    signature: Optional[dict] = None,
+    ip_address: Optional[str] = None,
+) -> ApprovalWorkflow:
+    """
+    Record one decision and move the chain.
+
+        approve   → step done, next step becomes current, or the whole thing is approved
+        reject    → the process ends here
+        changes   → back to the author; the chain restarts when they resubmit
+
+    A signature is required exactly when the step says so; supplying one where
+    it is not required is accepted and recorded, because a person choosing to
+    sign is never a problem.
+    """
+    if workflow.status not in (ACTIVE,):
+        raise WorkflowError("This approval is not active.")
+
+    allowed, why = can_act(user, step)
+    if not allowed:
+        raise WorkflowError(why)
+
+    action = (action or "").lower()
+    if action not in ("approve", "reject", "changes"):
+        raise WorkflowError(f"'{action}' is not a decision.")
+
+    # A step belonging to the record process has no rejection. The chart gives
+    # that process a single decision point and no exit that discards a record:
+    # a disagreeing CFT member raises an objection, a Process Owner who finds a
+    # record out of specification returns it to be corrected, and a final
+    # decision that is not to approve sends it back to the CFT. Letting the
+    # generic path end the workflow here would strand the record at a stage the
+    # chart cannot leave, so it is refused at the engine rather than only in the
+    # router - there must be no way in that loses a record.
+    if step.qms_stage and action in ("reject", "changes"):
+        raise WorkflowError(
+            "A quality record is never rejected outright. Use the record "
+            "process: object on the joint review, return it for correction, or "
+            "send it back to the CFT from the final decision."
+        )
+
+    if action == "reject" and not reason.strip():
+        raise WorkflowError("A rejection must say why.")
+    if action == "changes" and not comment.strip():
+        raise WorkflowError("Say what needs to change.")
+
+    now = datetime.utcnow()
+    step.decided_at = now
+    step.decided_by = user.id
+    step.comment = comment.strip() or None
+    step.reason = reason.strip() or None
+
+    if action == "approve":
+        if step.requires_signature:
+            if not signature or not signature.get("dataUrl"):
+                raise WorkflowError("This step must be signed. Add your signature to approve.")
+            if not (user.can_sign or user.is_admin):
+                raise WorkflowError("You are not permitted to apply a signature.")
+
+        signature_id = None
+        if signature and signature.get("dataUrl"):
+            signature_id = _store_signature(db, user, signature, ip_address)
+            step.signature_id = signature_id
+
+        # One row per person, so a step needing three approvals keeps three
+        # comments and three signatures rather than overwriting the columns.
+        _record(db, step, user, "approved", comment, reason, signature_id)
+
+        still_to_go = outstanding(step)
+        if still_to_go:
+            # The step stays open and stays current. The chain does not move,
+            # so the document cannot reach publishing until everybody has
+            # signed - which is the whole point of this mode.
+            names = ", ".join(_who(p) for p in still_to_go)
+            _event(db, workflow, step, user, "approved",
+                   f"{_who(user)} approved '{step.name}'"
+                   + (" and signed" if signature_id else "")
+                   + f" · still waiting on {names}",
+                   comment)
+            db.commit()
+            db.refresh(workflow)
+            return workflow
+
+        step.status = APPROVED
+        _event(db, workflow, step, user, "approved",
+               f"{_who(user)} approved '{step.name}'"
+               + (" and signed" if step.signature_id else ""),
+               comment)
+        _advance(db, workflow, step, user)
+
+    elif action == "reject":
+        # A rejection is decisive whatever the mode. Waiting for the other two
+        # approvers to agree with a "no" that has already stopped the document
+        # would waste their time and change nothing.
+        _record(db, step, user, "rejected", comment, reason, None)
+        step.status = REJECTED
+        workflow.status = REJECTED
+        workflow.completed_at = now
+        for other in workflow.steps:
+            if other.status in (PENDING, CURRENT):
+                other.status = "skipped"
+        _event(db, workflow, step, user, "rejected",
+               f"{_who(user)} rejected at '{step.name}' · {reason}", comment)
+
+    else:  # changes
+        # Likewise: the document is going back to its author, so there is
+        # nothing left for the remaining approvers to approve.
+        _record(db, step, user, "changes", comment, reason, None)
+        step.status = CHANGES
+        workflow.status = CHANGES
+        for other in workflow.steps:
+            if other.status in (PENDING, CURRENT):
+                other.status = PENDING
+        _event(db, workflow, step, user, "changes",
+               f"{_who(user)} sent it back from '{step.name}'", comment)
+
+    db.commit()
+    db.refresh(workflow)
+    return workflow
+
+
+def _record(db: Session, step: ApprovalStep, user: User, action: str,
+            comment: str, reason: str, signature_id: Optional[str]) -> StepDecision:
+    """Keep this person's own answer, separate from the step's closing one."""
+    decision = StepDecision(
+        step_id=step.id,
+        user_id=user.id if user else None,
+        action=action,
+        comment=(comment or "").strip() or None,
+        reason=(reason or "").strip() or None,
+        signature_id=signature_id,
+        decided_at=datetime.utcnow(),
+    )
+    db.add(decision)
+    # Flush so `outstanding()` counts the decision just made; without this the
+    # last approver of three would still be reported as outstanding.
+    db.flush()
+    if step.decisions is not None and decision not in step.decisions:
+        step.decisions.append(decision)
+    return decision
+
+
+def _advance(db: Session, workflow: ApprovalWorkflow, step: ApprovalStep, actor: User) -> None:
+    """Hand the document to the next step, or finish the workflow."""
+    following = [s for s in workflow.steps if s.order_index > step.order_index
+                 and s.status == PENDING]
+
+    if following:
+        nxt = following[0]
+        nxt.status = CURRENT
+        nxt.due_date = _due(datetime.utcnow(), nxt.sla_hours)
+        return
+
+    workflow.status = APPROVED
+    workflow.completed_at = datetime.utcnow()
+
+    # The document itself carries the outcome, so lists and search can show it
+    # without joining through the workflow.
+    document = db.query(Document).filter(Document.id == workflow.document_id).first()
+    if document:
+        document.is_approved = True
+        document.approved_at = workflow.completed_at
+        document.approved_by = actor.id if actor else None
+
+    _event(db, workflow, None, actor, "approved",
+           "Fully approved")
+
+
+# ------------------------------------------------------------------- QMS
+#
+# The client's record process fixes both the chain and the people on it, so a
+# record never asks anybody to design a route. Everything below exists to build
+# that one chain, and to implement the single thing it does that a generic
+# approval engine does not: the loop back to the CFT when the final decision is
+# "No".
+
+
+QMS_PO = "po_approval"
+QMS_OPO = "opo_approval"
+QMS_CFT = "cft_review"
+QMS_FINAL = "final_decision"
+
+
+def qms_chain_steps(fmt) -> list[dict]:
+    """
+    The approval chain for one template, in order.
+
+    By default this is the four steps of the process document:
+
+        1  Process Owner approval          B4
+        2  Overall Process Owner approval  B4 condition
+        3  CFT joint review                B6   - every member, to a target date
+        4  Final decision                  B7   - may send it back to step 3
+
+    A template may carry its own route instead - an extra verification before
+    the Process Owner, a second signatory, a review the plant has added - and
+    `approval_route.parse` returns the four steps above whenever it carries
+    none. The process is therefore the default, not a suggestion.
+
+    The stage tags are load-bearing wherever they appear. `record_service`
+    reads them to know which step is the joint review (so a negative answer is
+    recorded as an *objection* and carried to the decision, rather than as a
+    rejection) and which is the final decision (so "No" sends the record back
+    up the chart instead of ending it). A step with no stage is an ordinary
+    approval and behaves like one.
+    """
+    from . import approval_route as routes
+
+    steps = routes.parse(fmt.approval_route, fmt.cft_target_days)
+    overrides = getattr(fmt, "_record_approval_overrides", {}) or {}
+
+    return [
+        {
+            "name": step["name"],
+            "qms_stage": step.get("stage"),
+            "assignee_ids": (overrides[step.get("addressed_to")]
+                             if step.get("addressed_to") in overrides
+                             else routes.assignees_for(step, fmt)),
+            "requires_signature": bool(step.get("requires_signature")),
+            "sla": max(1, int(step.get("days") or 1)) * 24,
+            "approval_mode": ALL_OF if step.get("mode") == "all" else ANY_OF,
+        }
+        for step in steps
+    ]
+
+
+def build_qms_chain(db: Session, document: Document, fmt, actor: User,
+                    record=None) -> ApprovalWorkflow:
+    """
+    Build and start the record approval chain for one record.
+
+    Raises rather than guessing if the format is missing a responsibility. A
+    chain with an unassigned step would sit still forever, and finding that out
+    three days later is worse than being refused now.
+    """
+    if record is not None:
+        import json
+        try:
+            fmt._record_approval_overrides = json.loads(record.approval_overrides or "{}")
+        except (TypeError, ValueError):
+            fmt._record_approval_overrides = {}
+
+    overrides = getattr(fmt, "_record_approval_overrides", {}) or {}
+    missing = []
+    if not ("process_owner" in overrides
+            and overrides["process_owner"] or fmt.process_owner_id):
+        missing.append("Process Owner")
+    if not ("overall_process_owner" in overrides
+            and overrides["overall_process_owner"] or fmt.overall_process_owner_id):
+        missing.append("Overall Process Owner")
+    if not ("cft_members" in overrides
+            and overrides["cft_members"] or fmt.cft_members):
+        missing.append("CFT members")
+    if missing:
+        raise WorkflowError(
+            f"Format {fmt.code} cannot start an approval because it has no "
+            + ", ".join(missing)
+            + ". Set the responsibilities on the format first."
+        )
+
+    name = f"{fmt.code} rev {fmt.revision}"
+    if record is not None and record.period_label:
+        name = f"{name} - {record.period_label}"
+
+    return create_workflow(
+        db, document, actor,
+        name=name[:120],
+        template_id=f"qms:{fmt.id}",
+        priority="high" if (record is not None
+                            and record.observation_status == "not_ok") else "normal",
+        department=fmt.team.name if fmt.team else None,
+        notes=fmt.work_instruction,
+        steps=qms_chain_steps(fmt),
+        start=True,
+    )
+
+
+def reopen_cft_review(db: Session, workflow: ApprovalWorkflow, actor: User,
+                      reason: str) -> ApprovalWorkflow:
+    """
+    The chart's "No" branch: send the record back to the CFT, not to the bin.
+
+    `decide(..., "reject")` is terminal, and rightly so for an ordinary
+    document. The record process is different: its reject arrow loops back up
+    to the joint review band, so the record stays alive and the CFT is asked to
+    look again.
+
+    Every CFT decision from the previous round is cleared. A member who agreed
+    the record was fit last week has not seen the reason it came back, and
+    counting their old approval towards the new round would let the review close
+    without anybody actually re-verifying anything.
+    """
+    cft = next((s for s in workflow.steps if s.qms_stage == QMS_CFT), None)
+    final = next((s for s in workflow.steps if s.qms_stage == QMS_FINAL), None)
+    if not cft:
+        raise WorkflowError("This approval has no CFT joint review to reopen.")
+
+    now = datetime.utcnow()
+
+    for step in (cft, final):
+        if not step:
+            continue
+        step.status = PENDING
+        step.decided_at = None
+        step.decided_by = None
+        step.comment = None
+        step.reason = None
+        step.signature_id = None
+        step.decisions.clear()
+
+    cft.status = CURRENT
+    cft.due_date = _due(now, cft.sla_hours)
+
+    # The chain as a whole goes back into flight. It may have been marked
+    # approved a moment ago by the very decision now being reversed.
+    workflow.status = ACTIVE
+    workflow.completed_at = None
+
+    document = db.query(Document).filter(Document.id == workflow.document_id).first()
+    if document:
+        document.is_approved = False
+        document.approved_at = None
+        document.approved_by = None
+
+    _event(db, workflow, cft, actor, "reverify",
+           f"{_who(actor)} sent the record back to the CFT for re-verification",
+           reason)
+    db.commit()
+    db.refresh(workflow)
+    return workflow
+
+
+def qms_step(workflow: ApprovalWorkflow, stage: str) -> Optional[ApprovalStep]:
+    """The step of a QMS chain that implements a given box of the chart."""
+    return next((s for s in workflow.steps if s.qms_stage == stage), None)
+
+
+def record_cft_opinion(db: Session, workflow: ApprovalWorkflow, step: ApprovalStep,
+                       user: User, agrees: bool, comment: str = "",
+                       reason: str = "") -> ApprovalWorkflow:
+    """
+    One CFT member's answer on the joint review (B6).
+
+    The chart gives the record process exactly one decision point - the final
+    decision at B7 - and says that decision "require[s] from CFT". So a member
+    who disagrees is not rejecting the record; they are recording an objection
+    that the person taking the final decision has to see.
+
+    Treating it as an ordinary rejection would end the workflow and strand the
+    record at a stage the chart has no exit from.
+    """
+    allowed, why = can_act(user, step)
+    if not allowed:
+        raise WorkflowError(why)
+
+    if not agrees and not (comment or reason).strip():
+        raise WorkflowError("Say what your objection is, so the final decision can weigh it.")
+
+    # Read the answers from the database rather than from this session's copy.
+    # Two members answering at the same moment each hold a step object loaded
+    # before the other acted, and `can_act` would let the same person answer
+    # twice on a stale one.
+    if _answered_ids(db, step) & {user.id}:
+        raise WorkflowError("You have already given your decision on this step.")
+
+    action = "approved" if agrees else OBJECTED
+    _record(db, step, user, action, comment, reason, None)
+
+    # This person's answer is durable before anybody asks whether the review is
+    # finished. Until it is committed, the other member cannot see it, and both
+    # would conclude the other was still outstanding - which is exactly how a
+    # joint review deadlocks with everybody having answered.
+    db.commit()
+
+    still_to_go = [a for a in (step.assignees or [])
+                   if a.id not in _answered_ids(db, step)]
+    if still_to_go:
+        names = ", ".join(_who(p) for p in still_to_go)
+        _event(db, workflow, step, user,
+               "approved" if agrees else "objected",
+               f"{_who(user)} "
+               + ("agreed on the joint review" if agrees
+                  else "objected on the joint review")
+               + f" · still waiting on {names}",
+               comment or reason)
+        db.commit()
+        db.refresh(workflow)
+        return workflow
+
+    # Everybody has answered, so the joint review is concluded whatever they
+    # said. Exactly one caller may close it: the conditional update below
+    # succeeds for whichever thread gets there first and reports zero rows to
+    # the other, so the chain is advanced once and only once.
+    closed = db.execute(
+        update(ApprovalStep)
+        .where(ApprovalStep.id == step.id, ApprovalStep.status == CURRENT)
+        .values(status=APPROVED, decided_at=datetime.utcnow(), decided_by=user.id)
+    ).rowcount
+    db.commit()
+
+    if not closed:
+        # The other member closed it a moment ago. Their call advanced the
+        # chain; there is nothing left for this one to do.
+        db.expire_all()
+        db.refresh(workflow)
+        return workflow
+
+    db.expire_all()
+    db.refresh(step)
+    db.refresh(workflow)
+
+    objections = [d for d in (step.decisions or []) if d.action == OBJECTED]
+    _event(db, workflow, step, user,
+           "objected" if objections else "approved",
+           "Joint review concluded"
+           + (f" with {len(objections)} objection"
+              + ("" if len(objections) == 1 else "s") if objections else " · the CFT agreed"),
+           comment or reason)
+    _advance(db, workflow, step, user)
+    db.commit()
+    db.refresh(workflow)
+    return workflow
+
+
+def _answered_ids(db: Session, step: ApprovalStep) -> set:
+    """
+    Who has answered this step, read from the database.
+
+    Deliberately not `step.decisions`: that is this session's copy, loaded
+    before whatever another person did a moment ago, and every concurrency
+    question here turns on seeing their answer.
+    """
+    rows = (
+        db.query(StepDecision.user_id)
+        .filter(StepDecision.step_id == step.id,
+                StepDecision.action.in_(ANSWERED))
+        .all()
+    )
+    return {r[0] for r in rows}
+
+
+def cft_objections(workflow: ApprovalWorkflow) -> list[StepDecision]:
+    """What the CFT objected to, for whoever takes the final decision."""
+    step = qms_step(workflow, QMS_CFT)
+    if not step:
+        return []
+    return [d for d in (step.decisions or []) if d.action == OBJECTED]
+
+
+def reset_cft_answers(db: Session, workflow: ApprovalWorkflow) -> None:
+    """
+    Wipe the joint review's answers so the CFT looks at the record again.
+
+    Used when a record under re-verification has its readings corrected. An
+    answer given against the old readings is not an answer about the new ones.
+    """
+    step = qms_step(workflow, QMS_CFT)
+    if not step:
+        return
+    step.decisions.clear()
+    step.decided_at = None
+    step.decided_by = None
+    step.comment = None
+    step.reason = None
+    step.signature_id = None
+    if step.status != CURRENT:
+        step.status = CURRENT
+        step.due_date = _due(datetime.utcnow(), step.sla_hours)
+    db.flush()
+
+
+def return_for_correction(db: Session, workflow: ApprovalWorkflow, actor: User,
+                          reason: str) -> ApprovalWorkflow:
+    """
+    Hand a record back to be corrected, before the joint review has opened.
+
+    B4 approves a record "if found within specification condition". The chart
+    draws no exit for the case where it is not, because the answer is not to
+    throw the record away - it is to correct it and run the approval again. So
+    the chain is cancelled rather than rejected, and the record returns to
+    filling with a fresh chain built when it is resubmitted.
+    """
+    workflow.status = CANCELLED
+    workflow.completed_at = datetime.utcnow()
+    for step in workflow.steps:
+        if step.status in (PENDING, CURRENT):
+            step.status = "skipped"
+
+    document = db.query(Document).filter(Document.id == workflow.document_id).first()
+    if document:
+        document.is_approved = False
+        document.approved_at = None
+        document.approved_by = None
+
+    _event(db, workflow, None, actor, "changes",
+           f"{_who(actor)} returned the record for correction", reason)
+    db.commit()
+    db.refresh(workflow)
+    return workflow
+
+
+def resubmit(db: Session, workflow: ApprovalWorkflow, actor: User,
+             note: str = "") -> ApprovalWorkflow:
+    """
+    The author has addressed the requested changes; run the chain again.
+
+    Every step starts over rather than resuming where it stopped. An approver
+    who signed version 1 has not seen version 2, and treating their old
+    signature as still valid would be a lie about what they agreed to.
+    """
+    if workflow.status != CHANGES:
+        raise WorkflowError("This approval is not waiting for changes.")
+
+    for step in workflow.steps:
+        step.status = PENDING
+        step.decided_at = None
+        step.decided_by = None
+        step.comment = None
+        step.reason = None
+        step.signature_id = None
+        # The individual answers go too. Somebody who approved version 1 has
+        # not seen version 2; leaving their row would count them towards the
+        # new round and let a step close without them ever looking at it.
+        step.decisions.clear()
+
+    workflow.status = DRAFT
+    workflow.completed_at = None
+    _event(db, workflow, None, actor, "restarted",
+           "Author resubmitted · approvals restarted from step 1", note)
+    db.commit()
+    return start_workflow(db, workflow, actor)
+
+
+def _store_signature(db: Session, user: User, payload: dict,
+                     ip_address: Optional[str]) -> str:
+    data_url = payload.get("dataUrl") or ""
+    if not data_url.startswith("data:image/"):
+        raise WorkflowError("That signature is not a valid image.")
+    if len(data_url) > 2_000_000:
+        raise WorkflowError("That signature image is too large.")
+
+    # The designation is copied here, not looked up later. Somebody who signs
+    # as Head of Finance and is promoted next year must still read as Head of
+    # Finance on the document they signed. Name and designation are the
+    # signer's account, never what the browser sent: nobody signs as somebody else.
+    designation = (user.job_title or "").strip()
+
+    signature = Signature(
+        user_id=user.id,
+        name=(user.full_name or user.username)[:120],
+        designation=designation[:120] or None,
+        method=(payload.get("method") or "draw")[:20],
+        data_url=data_url,
+        ip_address=ip_address,
+    )
+    db.add(signature)
+    db.flush()
+    return signature.id
+
+
+# ------------------------------------------------------------------ queries
+
+
+def active_for_document(db: Session, document_id: str) -> Optional[ApprovalWorkflow]:
+    """The live workflow for a document, if there is one."""
+    return (
+        db.query(ApprovalWorkflow)
+        .filter(
+            ApprovalWorkflow.document_id == document_id,
+            ApprovalWorkflow.status.notin_([CANCELLED]),
+        )
+        .order_by(ApprovalWorkflow.created_at.desc())
+        .first()
+    )
+
+
+def load(db: Session, workflow_id: str) -> Optional[ApprovalWorkflow]:
+    return (
+        db.query(ApprovalWorkflow)
+        .options(joinedload(ApprovalWorkflow.steps).joinedload(ApprovalStep.assignees))
+        .filter(ApprovalWorkflow.id == workflow_id)
+        .first()
+    )
+
+
+def current_step(workflow: ApprovalWorkflow) -> Optional[ApprovalStep]:
+    for step in workflow.steps:
+        if step.status == CURRENT:
+            return step
+    return None
+
+
+def tasks_for(db: Session, user: User) -> list[tuple[ApprovalWorkflow, ApprovalStep]]:
+    """
+    Every step waiting on this user, soonest deadline first.
+
+    A step reaches someone two ways: they are named on it, or it is addressed to
+    their department and nobody was named. Administrators see everything, since
+    somebody has to be able to unblock a process when a person is away.
+    """
+    query = (
+        db.query(ApprovalStep)
+        .join(ApprovalWorkflow, ApprovalStep.workflow_id == ApprovalWorkflow.id)
+        .filter(ApprovalStep.status == CURRENT, ApprovalWorkflow.status == ACTIVE)
+    )
+
+    steps = query.all()
+    out: list[tuple[ApprovalWorkflow, ApprovalStep]] = []
+
+    for step in steps:
+        # A step this person has already answered is not waiting on them, even
+        # though it is still open waiting on their colleagues. Leaving it on
+        # their list would ask them to approve the same document twice.
+        if has_decided(step, user):
+            continue
+        if user.is_admin:
+            # Administrators may monitor the queue, but an explicitly assigned
+            # approval belongs only to the named person. This keeps My Tasks
+            # aligned with can_act() and prevents admin takeover.
+            if step.assignees:
+                if any(a.id == user.id for a in step.assignees):
+                    out.append((step.workflow, step))
+            else:
+                out.append((step.workflow, step))
+            continue
+        if not (user.can_approve or user.has_permission("documents.approve")):
+            continue
+        if step.assignees:
+            if any(a.id == user.id for a in step.assignees):
+                out.append((step.workflow, step))
+        elif step.department and user.department and step.department == user.department:
+            out.append((step.workflow, step))
+        elif not step.department and not step.assignees:
+            out.append((step.workflow, step))
+
+    out.sort(key=lambda pair: _aware(pair[1].due_date) or _NO_DUE_DATE)
+    return out
+
+
+# Stored datetimes come back naive from SQLite and tz-aware from PostgreSQL, and
+# Python refuses to compare the two. Every comparison goes through UTC-aware.
+_NO_DUE_DATE = datetime.max.replace(tzinfo=timezone.utc)
+
+
+def _aware(value: Optional[datetime]) -> Optional[datetime]:
+    if value is None:
+        return None
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
+def is_overdue(step: ApprovalStep) -> bool:
+    return bool(step.due_date and step.status == CURRENT
+                and _aware(step.due_date) < datetime.now(timezone.utc))
+
+
+def publish(db: Session, workflow: ApprovalWorkflow, actor: User) -> ApprovalWorkflow:
+    """Release an approved document. Only approval earns this."""
+    if not actor or not (actor.is_admin or actor.has_permission("documents.publish")):
+        raise WorkflowError("You do not have permission to publish documents.")
+    if workflow.status != APPROVED:
+        raise WorkflowError("Only a fully approved document can be published.")
+    workflow.status = PUBLISHED
+    workflow.published_at = datetime.utcnow()
+    workflow.published_by = actor.id if actor else None
+    _event(db, workflow, None, actor, "published", f"{_who(actor)} published this document")
+    db.commit()
+    db.refresh(workflow)
+    return workflow
+
+
+def remind(db: Session, workflow: ApprovalWorkflow, actor: User) -> str:
+    step = current_step(workflow)
+    if not step:
+        raise WorkflowError("There is nobody to remind: nothing is waiting.")
+    who = (", ".join(a.full_name or a.username for a in step.assignees)
+           or step.role or step.department or "the assigned approver")
+    _event(db, workflow, step, actor, "reminded", f"Reminder sent to {who}")
+    db.commit()
+    return who
+
+
+def alternative_approvers(db: Session, step: ApprovalStep) -> list[User]:
+    # A named step may contain several possible assignees. Keep the first named
+    # person as the primary and offer the remaining named people first; an
+    # escalation must not discard the alternates that were already configured.
+    # The association table has no ordering column, so normalize named people
+    # before identifying the primary. This keeps escalation deterministic across
+    # database backends while preserving the configured primary-first behavior.
+    assigned = sorted(
+        step.assignees or [],
+        key=lambda user: (user.full_name or "", user.username or ""),
+    )
+    assigned_ids = {user.id for user in assigned}
+
+    def eligible(user: User) -> bool:
+        return (
+            user.is_active
+            and (user.can_approve or user.is_admin)
+            and (not step.department or user.department == step.department)
+            and (not step.requires_signature or user.can_sign or user.is_admin)
+        )
+
+    named_alternates = [user for user in assigned[1:] if eligible(user)]
+    query = db.query(User).filter(
+        User.is_active.is_(True),
+        User.id.notin_(assigned_ids or {"__none__"}),
+        or_(User.can_approve.is_(True), User.is_admin.is_(True)),
+    )
+    if step.department:
+        query = query.filter(User.department == step.department)
+
+    # Keep this list identical to the candidates used by escalation itself.
+    # The step's department is the category boundary; `role` is descriptive in
+    # older workflows and must not hide a valid approver from the preview.
+    unassigned = query.order_by(User.full_name, User.username).all()
+    if step.requires_signature:
+        unassigned = [user for user in unassigned if user.can_sign or user.is_admin]
+    return _within_record(db, step, named_alternates + unassigned)
+
+
+def _within_record(db: Session, step: ApprovalStep, people: list[User]) -> list[User]:
+    """On a quality record, a step is handed only to its own team, and never to somebody who
+    already approves the record in another role (four eyes)."""
+    from ..models_qms import Record
+    from . import record_service
+
+    record = db.query(Record).filter(Record.workflow_id == step.workflow_id).first()
+    if record is None:
+        return people
+    others = (record_service.process_owner_ids(record) | record_service.overall_process_owner_ids(record)
+              | {m.id for m in (record.format.cft_members if record.format else [])})
+    others -= {u.id for u in step.assignees or []}
+    return [u for u in people
+            if u.id not in others and (not record.team_id or u.quality_team_id == record.team_id)]
+
+def escalate_current_step(db: Session, workflow: ApprovalWorkflow, actor: User,
+                         reason: str = "Approver unavailable",
+                         alternate_user_id: Optional[str] = None) -> Optional[ApprovalStep]:
+    """Escalate a pending step when the primary approver is unavailable."""
+    step = current_step(workflow)
+    if not step or workflow.status != ACTIVE:
+        return None
+    if not (actor and (actor.is_admin or is_overdue(step))):
+        raise WorkflowError("Only an administrator or an overdue approval can be escalated.")
+
+    alternatives = alternative_approvers(db, step)
+    alternate = next((user for user in alternatives
+                      if user.id == alternate_user_id), None) if alternate_user_id else None
+    if alternate_user_id and not alternate:
+        raise WorkflowError("That user is not an eligible alternative for this approval step.")
+    alternate = alternate or (alternatives[0] if alternatives else None)
+    if not alternate:
+        return None
+
+    step.assignees = [alternate]
+    step.reason = (reason or "Approver unavailable").strip()[:500] or None
+    step.due_date = _due(datetime.utcnow(), step.sla_hours or 24)
+    step.updated_at = datetime.utcnow() if hasattr(step, 'updated_at') else None
+    _event(db, workflow, step, actor, "escalated",
+           f"Escalation: {step.reason} · reassigned to {alternate.full_name or alternate.username}")
+    db.commit()
+    db.refresh(step)
+    return step
+
+
+# ------------------------------------------------------------------ helpers
+
+
+def _event(db: Session, workflow: ApprovalWorkflow, step: Optional[ApprovalStep],
+           actor: Optional[User], kind: str, summary: str, detail: str = "") -> None:
+    db.add(WorkflowEvent(
+        workflow_id=workflow.id,
+        step_id=step.id if step else None,
+        actor_id=actor.id if actor else None,
+        kind=kind,
+        summary=summary[:400],
+        detail=(detail or "").strip() or None,
+    ))
+
+
+def _who(user: Optional[User]) -> str:
+    if not user:
+        return "The system"
+    return user.full_name or user.username
+
+
+def progress(workflow: ApprovalWorkflow) -> dict:
+    """Counts for a progress bar, so every screen reports the same numbers."""
+    total = len(workflow.steps)
+    done = sum(1 for s in workflow.steps if s.status == APPROVED)
+    return {
+        "total": total,
+        "done": done,
+        "percent": int(done / total * 100) if total else 0,
+    }
