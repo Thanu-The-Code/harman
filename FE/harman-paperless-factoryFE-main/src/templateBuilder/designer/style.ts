@@ -7,7 +7,6 @@ const MUTED = "#6b7280";
 export const designerStyles: SxProps<Theme> = {
   p: 2.5,
   bgcolor: "#f3f9f9",
-  minHeight: "100%",
   fontFamily: '"Plus Jakarta Sans", "Inter", Roboto, sans-serif',
 
   "& .designer-header": {

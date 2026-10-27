@@ -240,6 +240,12 @@ export default class TableEditor extends React.Component {
             </tbody>
           </table>
         </div>
+        {element.header.length === 0 && (
+          <button type="button" className="btn btn-outline-secondary btn-sm mb-1"
+            onClick={() => this.structure(() => T.addHeaderRow(element), { part: 'header', r: 0, c: 0 })}>
+            + Heading row
+          </button>
+        )}
         <button type="button" className="btn btn-success btn-sm" onClick={() => this.structure(() => T.addRow(this.props.element, this.props.element.rows.length))}>
           <i className="fas fa-plus-circle"></i> <IntlMessages id="add-row" />
         </button>

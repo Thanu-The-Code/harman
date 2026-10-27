@@ -39,7 +39,7 @@ function pad(cells, n, filler) {
 
 export function headerGrid(element) {
   const n = (element.columns || []).length;
-  if (element.header && element.header.length) {
+  if (Array.isArray(element.header)) {
     return element.header.map(row => pad(row, n, () => ({ text: '' })));
   }
   return [(element.columns || []).map(col => ({ text: col.text || '' }))];

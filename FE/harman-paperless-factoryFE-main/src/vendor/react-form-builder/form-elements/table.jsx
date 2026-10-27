@@ -91,7 +91,7 @@ class Table extends React.Component {
         <ComponentHeader {...this.props} />
         <div className="form-group">
           <ComponentLabel {...this.props} />
-          <div className="table-responsive">
+          <div className={`table-responsive${wide ? ' rfb-table-scroll-wide' : ''}`}>
             <table className={`table table-bordered table-sm rfb-table${wide ? ' rfb-table-wide' : ''}`}>
               <thead>
                 {header.map((row, r) => (

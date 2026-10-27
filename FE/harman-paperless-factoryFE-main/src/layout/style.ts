@@ -15,14 +15,15 @@ export const RightColumn = styled.div`
   flex-direction: column;
   flex: 1;
   min-width: 0; /* Prevents flex flex-child from overflowing */
+  min-height: 0;
 `;
 
 export const MainContent = styled.main`
   flex: 1;
+  min-height: 0;
+  min-width: 0;
   overflow-y: auto;
   overflow-x: hidden;
   // padding: 24px;
 `;
-
-
 

@@ -237,13 +237,14 @@ function TemplateEditor({ format, imported, step }: EditorProps) {
 
   const status = format ? formatStatusLabel(format.status, format.approval_status) : null;
   const title = details.title.trim() || "Untitled";
+  const editingDesign = editable && step === "design";
   const back = () =>
     step === "process" && format
       ? navigate(`/builder/${format.id}/build?format_id=${format.id}`)
       : navigate(format ? `/builder/${format.id}` : "/builder");
 
   return (
-    <Box className="designer-page rfb-scope" sx={designerStyles}>
+    <Box className={`designer-page rfb-scope${editingDesign ? " designer-page-editing" : ""}`} sx={designerStyles}>
       <div className="designer-topbar">
         <div className="designer-title">
           <IconButton className="back-btn" aria-label="Back" onClick={back}>
