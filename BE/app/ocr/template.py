@@ -534,7 +534,7 @@ def _to_element(item, meta, page_w, page_h, line_height, sheet=None):
     raise ValueError(kind)
 
 
-def assemble(page_items):
+def assemble(page_items, preserve_geometry=False):
     """page_items: [{"items", "width", "height", "line_height", "sheet"?}] -> task_data.
 
     Items on one visual row become a Two/Three/Multi column row; pages after the first start
@@ -550,10 +550,22 @@ def assemble(page_items):
                 _to_element(it, meta, page["width"], page["height"], page["line_height"], page.get("sheet"))
                 for it in row["items"]
             ]
+            if preserve_geometry:
+                for elem, item in zip(elems, row["items"]):
+                    if item.get("bbox"):
+                        elem["layout_position"] = {
+                            "left": item["bbox"][0] / page["width"],
+                            "top": (p_index + item["bbox"][1] / page["height"]) / len(page_items),
+                            "width": g.width(item["bbox"]) / page["width"],
+                            "height": g.height(item["bbox"]) / page["height"] / len(page_items),
+                        }
+                        elem["layout_page"] = p_index
+                        elem["layout_page_count"] = len(page_items)
+                        elem["layout_page_size"] = [page["width"], page["height"]]
             for it in row["items"]:
                 counts[it["kind"]] = counts.get(it["kind"], 0) + 1
             has_input = any(it["kind"] in ("field", "choice") for it in row["items"])
-            if 2 <= len(elems) <= 6 and has_input:
+            if not preserve_geometry and 2 <= len(elems) <= 6 and has_input:
                 container = el.container_element(len(elems))
                 parent_index = len(top)
                 for col, child in enumerate(elems):
@@ -565,7 +577,7 @@ def assemble(page_items):
                 top.append(container)
             else:
                 top.extend(elems)
-        if p_index > 0 and len(top) > page_start:
+        if not preserve_geometry and p_index > 0 and len(top) > page_start:
             top[page_start]["pageBreakBefore"] = True
     task_data = labels.disambiguate(top + children)
     title.lead_with_title(task_data)

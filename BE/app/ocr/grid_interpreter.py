@@ -245,7 +245,13 @@ class GridInterpreter:
                 if body and leaf(a.col) in input_cols:
                     cell = input_cell(a)  # a written value in an input column of a filled copy
                 else:
-                    cell = {"text": a.text.strip()} if not a.is_blank else (input_cell(a) if body else {"text": ""})
+                    # Only a visibly boxed/styled blank is an answer area. Unruled empty
+                    # worksheet cells are layout whitespace and must not become inputs.
+                    cell = (
+                        {"text": a.text.strip()}
+                        if not a.is_blank
+                        else (input_cell(a) if body and a.boxed else {"text": ""})
+                    )
                 if cs > 1:
                     cell["colspan"] = cs
                 if rs > 1:

@@ -32,7 +32,13 @@ class ExcelHandler(FormatHandler, TemplateBuilder, ValueExtractor, Digitizer, Fo
 
     @staticmethod
     def _layouts(file):
-        return [SheetLayout(sh) for sh in read_workbook(file.data)]
+        layouts = [SheetLayout(sh) for sh in read_workbook(file.data)]
+        # Workbooks often contain a small lookup sheet or an accidental second sheet.
+        # Do not turn those auxiliary cells into an extra page in the form designer.
+        return [
+            layout for layout in layouts
+            if any(cell.boxed or cell.image for cell in layout.grid().cells)
+        ]
 
     @staticmethod
     def _document(layouts):
@@ -45,11 +51,14 @@ class ExcelHandler(FormatHandler, TemplateBuilder, ValueExtractor, Digitizer, Fo
         for layout in layouts:
             if not layout.grid().cells:
                 continue
-            items = GridInterpreter(layout.grid(), text_size=layout.text_size, filled=filled).interpret()
-            items = textgrid.tabulate(items, layout.line_height)
+            interpreter = GridInterpreter(layout.grid(), text_size=layout.text_size, filled=filled)
+            grid = layout.grid()
+            # Excel is already a positioned grid. Keeping the complete sheet as one table
+            # prevents irregular forms from being reflowed into unrelated fields/tables.
+            items = [interpreter._table_item(0, 0, grid.n_rows, 0, grid.n_cols)]
             pages.append({"items": items, "width": layout.width, "height": layout.height,
                           "line_height": layout.line_height, "sheet": layout.sheet.name})
-        return assemble(pages)
+        return assemble(pages, preserve_geometry=True)
 
     def build_template(self, file):
         layouts = self._layouts(file)

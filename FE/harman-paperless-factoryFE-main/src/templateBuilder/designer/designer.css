@@ -219,6 +219,32 @@
   background-image: radial-gradient(#dde3e3 1px, transparent 1px);
   background-size: 16px 16px;
 }
+.designer-sheet .designer-preview-geometry {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  min-height: 720px;
+  background: #fff;
+}
+.designer-sheet .designer-preview-geometry-inner {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: visible;
+  background-color: #fff;
+  background-image: radial-gradient(#dde3e3 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+.designer-sheet-geometry {
+  background: #fff;
+}
+.designer-sheet-geometry .rfb-card {
+  margin-bottom: 0 !important;
+}
 .designer-sheet .table-responsive.rfb-table-scroll-wide {
   overflow: visible;
 }

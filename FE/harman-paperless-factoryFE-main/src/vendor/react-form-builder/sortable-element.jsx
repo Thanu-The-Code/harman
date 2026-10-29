@@ -163,7 +163,15 @@ const DraggableCard = (props) => {
   // Field Properties -> Appearance: a field narrower than the page sits beside the next one.
   const data = restProps.data || {};
   const width = FIELD_WIDTHS[data.field_width];
-  const outer = width ? { display: 'inline-block', width, verticalAlign: 'top', paddingRight: 8 } : undefined;
+  const position = data.layout_position;
+  const outer = position ? {
+    position: 'absolute',
+    left: `${position.left * 100}%`,
+    top: `${position.top * 100}%`,
+    width: `${position.width * 100}%`,
+    minHeight: `${position.height * 100}%`,
+    boxSizing: 'border-box',
+  } : (width ? { display: 'inline-block', width, verticalAlign: 'top', paddingRight: 8 } : undefined);
 
   return (
     <div ref={previewRef} style={outer} className="rfb-card" data-element={data.element} data-id={data.id} onClick={(e) => selectOnClick(e, restProps)}>

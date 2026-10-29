@@ -32,6 +32,11 @@ const DesignerCanvas = ({ initialData, onChange, propertiesContainer, renderProp
     setEditElement(element);
     onSelect(element);
   };
+  const geometry = initialData.find((item) => item.layout_position && item.layout_page_size)?.layout_page_size as
+    | [number, number]
+    | undefined;
+  const pageCount = Number(initialData.find((item) => item.layout_page_count)?.layout_page_count ?? 1);
+  const excelLayout = Boolean(geometry);
 
   // the edit button toggles that element; clicking an element (selectOnly) selects it;
   // either way another element is switched to straight away
@@ -48,28 +53,33 @@ const DesignerCanvas = ({ initialData, onChange, propertiesContainer, renderProp
 
   return (
     // react-form-builder: the builder's own canvas styles (drag cursor, hover toolbar, disabled inputs)
-    <div className="react-form-builder designer-sheet" style={{ zoom: zoom / 100 }}>
+    <div className={`react-form-builder designer-sheet${excelLayout ? " designer-sheet-geometry" : ""}`} style={{ zoom: zoom / 100 }}>
       {/* outline the element being edited (the builder marks no selection itself) */}
       {editElement && (
         <style>{`.designer-sheet .rfb-card[data-id="${CSS.escape(String(editElement.id))}"] > div > .rfb-item,
           .designer-sheet .rfb-child[data-id="${CSS.escape(String(editElement.id))}"] > .rfb-item {
           border: 1px solid #14b8a6 !important; box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.12); }`}</style>
       )}
-      <Preview
-        className="react-form-builder-preview designer-preview"
-        data={initialData}
-        onPost={onPost}
-        saveAlways
-        editMode={!!editElement}
-        editElement={editElement}
-        editModeOn={editModeOn}
-        manualEditModeOff={() => select(null)}
-        parent={{ manualEditModeOff: () => select(null) }}
-        registry={Registry}
-        variables={{}}
-        renderEditForm={renderProperties}
-        editFormContainer={propertiesContainer}
-      />
+      <div
+        className={excelLayout ? "designer-preview-geometry" : undefined}
+        style={geometry ? { aspectRatio: `${geometry[0]} / ${geometry[1] * pageCount}` } : undefined}
+      >
+        <Preview
+          className={`react-form-builder-preview designer-preview${excelLayout ? " designer-preview-geometry-inner" : ""}`}
+          data={initialData}
+          onPost={onPost}
+          saveAlways
+          editMode={!!editElement}
+          editElement={editElement}
+          editModeOn={editModeOn}
+          manualEditModeOff={() => select(null)}
+          parent={{ manualEditModeOff: () => select(null) }}
+          registry={Registry}
+          variables={{}}
+          renderEditForm={renderProperties}
+          editFormContainer={propertiesContainer}
+        />
+      </div>
     </div>
   );
 };
