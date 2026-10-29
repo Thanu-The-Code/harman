@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Button, Dialog, IconButton, InputAdornment, MenuItem, TextField } from "@mui/material";
+import { Button, Dialog, IconButton, InputAdornment, TextField } from "@mui/material";
 import SearchIcon from "@mui/icons-material/Search";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
@@ -140,7 +140,7 @@ const TemplateDetailsDialog = ({ open, mode, initial, teams, folders, onClose, o
     }
   };
 
-  const valid = form.title.trim() && form.teamId;
+  const valid = form.title.trim();
 
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="md" className="template-details-dialog">
@@ -216,19 +216,6 @@ const TemplateDetailsDialog = ({ open, mode, initial, teams, folders, onClose, o
                 <TextField size="small" fullWidth placeholder={suggested || "Enter code"} value={form.code} onChange={(e) => set({ code: e.target.value.toUpperCase() })} slotProps={{ htmlInput: { "aria-label": "Form code" } }} />
               </div>
             </div>
-            <div className="tdd-label">
-              Quality Team<span className="fp-required"> *</span>
-            </div>
-            <TextField select size="small" fullWidth value={teams.some((t) => t.id === form.teamId) ? form.teamId : ""} onChange={(e) => set({ teamId: e.target.value })} slotProps={{ htmlInput: { "aria-label": "Quality team" }, select: { displayEmpty: true } }}>
-              <MenuItem value="">
-                <em>Select quality team</em>
-              </MenuItem>
-              {teams.map((t) => (
-                <MenuItem key={t.id} value={t.id}>
-                  {t.code} - {t.name}
-                </MenuItem>
-              ))}
-            </TextField>
             <div className="tdd-label">Description</div>
             <TextField size="small" fullWidth multiline minRows={4} placeholder="What this form is for" value={form.description} onChange={(e) => set({ description: e.target.value })} slotProps={{ htmlInput: { "aria-label": "Description" } }} />
           </div>

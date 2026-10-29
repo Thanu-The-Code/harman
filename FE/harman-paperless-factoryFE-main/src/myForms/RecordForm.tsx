@@ -131,9 +131,10 @@ export const LayoutRecordForm = ({ layout, values, edits, onChange, readOnly }: 
     const table = item as LayoutItem & TableElementLike;
     const columns = table.columns ?? [];
     const rows = table.rows ?? [];
+    const geometryClass = item.layout_position ? " record-table-geometry" : "";
     const span = (cell: { rowspan?: number; colspan?: number }) => ({ rowSpan: cell.rowspan, colSpan: cell.colspan });
     return (
-      <div className="record-table-block">
+      <div className={`record-table-block${geometryClass}`}>
         {plainText(item.label) && <div className="record-table-title">{plainText(item.label)}</div>}
         <div className="record-table-scroll">
           <table className="record-table">

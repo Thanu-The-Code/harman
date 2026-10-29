@@ -409,7 +409,6 @@
   min-height: 40px;
 }
 
-
 .designer-panel {
   flex: 0 0 304px;
   /* a wide table in Field Properties must not widen the panel (it squeezed the page to nothing) */

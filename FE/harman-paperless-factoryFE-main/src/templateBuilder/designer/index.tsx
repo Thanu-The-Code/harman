@@ -184,7 +184,8 @@ function TemplateEditor({ format, imported, step }: EditorProps) {
 
   /** Save the draft; returns the saved template, or null (details missing or the save failed). */
   const save = async (next: "save" | "continue", d = details): Promise<FormatDetail | null> => {
-    if (!d.title.trim() || !d.teamId) {
+    const teamId = d.teamId || teams[0]?.id || "";
+    if (!d.title.trim() || !teamId) {
       setAfterDetails(next);
       setDialog("details");
       return null;
@@ -193,12 +194,12 @@ function TemplateEditor({ format, imported, step }: EditorProps) {
     const withCode = d;
     try {
       if (format) {
-        const saved = await updateFormat({ id: format.id, ...payload(withCode) }).unwrap();
+        const saved = await updateFormat({ id: format.id, ...payload({ ...withCode, teamId }) }).unwrap();
         if (next === "save") toast.success("Draft saved.");
         else navigate(`/builder/${format.id}/build?format_id=${format.id}&step=process`);
         return saved;
       }
-      const created = await createFormat(payload(withCode)).unwrap();
+      const created = await createFormat(payload({ ...withCode, teamId })).unwrap();
       // the uploaded scan / PDF becomes the blank form people can print
       if (imported && RASTER.test(imported.fileName)) {
         await uploadBlank({ id: created.id, file: imported.file })
