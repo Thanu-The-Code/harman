@@ -35,10 +35,14 @@ class ExcelHandler(FormatHandler, TemplateBuilder, ValueExtractor, Digitizer, Fo
         layouts = [SheetLayout(sh) for sh in read_workbook(file.data)]
         # Workbooks often contain a small lookup sheet or an accidental second sheet.
         # Do not turn those auxiliary cells into an extra page in the form designer.
-        return [
+        substantive = [
             layout for layout in layouts
             if any(cell.boxed or cell.image for cell in layout.grid().cells)
         ]
+        # A number of workbook templates carry an older/current copy of the same
+        # form as separate worksheets. The designer represents one uploaded form,
+        # so use the first real form sheet and ignore later duplicate versions.
+        return substantive[:1]
 
     @staticmethod
     def _document(layouts):
@@ -55,6 +59,9 @@ class ExcelHandler(FormatHandler, TemplateBuilder, ValueExtractor, Digitizer, Fo
             grid = layout.grid()
             # Excel is already a positioned grid. Keeping the complete sheet as one table
             # prevents irregular forms from being reflowed into unrelated fields/tables.
+            # Embedded workbook images are intentionally omitted from the editable
+            # template: their native drawing coordinates do not match the responsive
+            # designer canvas and make the sheet appear as two stacked layers.
             items = [interpreter._table_item(0, 0, grid.n_rows, 0, grid.n_cols)]
             pages.append({"items": items, "width": layout.width, "height": layout.height,
                           "line_height": layout.line_height, "sheet": layout.sheet.name})

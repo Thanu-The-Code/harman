@@ -216,8 +216,9 @@ class GridInterpreter:
             r += 1
         return tables
 
-    def _table_item(self, r0, h_end, b_end, c0, c1):
+    def _table_item(self, r0, h_end, b_end, c0, c1, image_cells=None):
         full_grid = r0 == 0 and h_end == 0
+        image_cells = image_cells or set()
         cells = [a for a in self.g.cells if r0 <= a.row < b_end and c0 <= a.col < c1]
         bounds = sorted({a.col for a in cells} | {c1})
         leaf = lambda c: bisect.bisect_right(bounds, c) - 1  # noqa: E731
@@ -242,6 +243,11 @@ class GridInterpreter:
                 cs = leaf(min(a.end_col, c1) - 1) - leaf(a.col) + 1
                 rs = sum(1 for r in range(a.row, a.end_row) if r in pos)
                 lr, lc = pos[a.row], leaf(a.col)
+                if (a.row, a.col) in image_cells:
+                    grid[lr][lc] = {"covered": True}
+                    boxes[lr][lc] = a.bbox
+                    refs[lr][lc] = a.ref
+                    continue
                 if body and leaf(a.col) in input_cols:
                     cell = input_cell(a)  # a written value in an input column of a filled copy
                 else:

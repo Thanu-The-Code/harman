@@ -171,6 +171,8 @@ const DraggableCard = (props) => {
     width: `${position.width * 100}%`,
     minHeight: `${position.height * 100}%`,
     boxSizing: 'border-box',
+    zIndex: data.element === 'Image' ? 2 : 1,
+    overflow: data.element === 'Image' ? 'hidden' : undefined,
   } : (width ? { display: 'inline-block', width, verticalAlign: 'top', paddingRight: 8 } : undefined);
 
   return (

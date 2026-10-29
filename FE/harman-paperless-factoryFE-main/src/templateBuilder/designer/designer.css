@@ -221,35 +221,105 @@
 }
 .designer-sheet .designer-preview-geometry {
   position: relative;
-  width: 100%;
-  min-width: 0;
+  width: max-content;
+  min-width: 100%;
   height: auto;
   min-height: 720px;
   background: #fff;
+  background-image: none !important;
 }
-.designer-sheet .designer-preview-geometry-inner {
+.designer-sheet .react-form-builder-preview.designer-preview.designer-preview-geometry-inner {
   position: absolute;
   inset: 0;
-  width: 100%;
-  min-width: 0;
-  min-height: 0;
-  height: 100%;
+  width: max-content !important;
+  min-width: 100% !important;
+  min-height: 0 !important;
+  height: 100% !important;
   overflow: visible;
-  background-color: #fff;
-  background-image: radial-gradient(#dde3e3 1px, transparent 1px);
-  background-size: 16px 16px;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent !important;
 }
 .designer-sheet-geometry {
-  background: #fff;
+  background: #fff !important;
+  background-image: none !important;
 }
 .designer-sheet-geometry .rfb-card {
   margin-bottom: 0 !important;
+}
+.designer-sheet-geometry .Sortable .rfb-item {
+  margin-bottom: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0;
+  background: transparent;
+}
+.designer-sheet-geometry .rfb-card,
+.designer-sheet-geometry .rfb-card > div {
+  border: 0 !important;
+  box-shadow: none !important;
+  background: transparent !important;
+}
+.designer-sheet-geometry .rfb-card[data-element="Image"] {
+  background: #fff !important;
+  overflow: hidden;
+}
+.designer-sheet-geometry .rfb-card[data-element="Image"] img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+.designer-sheet-geometry .designer-preview-geometry,
+.designer-sheet-geometry .designer-preview-geometry-inner {
+  background-image: none !important;
+}
+.designer-sheet-geometry .rfb-card:hover,
+.designer-sheet-geometry .rfb-card:focus-within {
+  border: 0 !important;
+  box-shadow: none !important;
+}
+.designer-sheet-geometry .rfb-table {
+  margin: 0 !important;
+}
+.designer-sheet-geometry .rfb-card[data-element="Table"] > div > .rfb-item {
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  background: transparent !important;
+}
+.designer-sheet-geometry .rfb-card[data-element="Table"] .table-responsive {
+  margin: 0 !important;
 }
 .designer-sheet .table-responsive.rfb-table-scroll-wide {
   overflow: visible;
 }
 .designer-sheet .rfb-table-wide {
   width: max-content;
+}
+/* Geometry-imported Excel sheets already contain their own cell borders. The
+ * builder's normal card styling must not add a second sheet/table frame. */
+.designer-sheet-geometry .Sortable .rfb-card,
+.designer-sheet-geometry .Sortable .rfb-card > div,
+.designer-sheet-geometry .Sortable .rfb-card > div > .rfb-item,
+.designer-sheet-geometry .Sortable .rfb-card > div > .rfb-item .table-responsive {
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  background: transparent !important;
+}
+.designer-sheet-geometry .Sortable .rfb-item {
+  margin-bottom: 0 !important;
+}
+.designer-sheet-geometry .react-form-builder-preview {
+  border: 0 !important;
+  padding: 0 !important;
+  box-shadow: none !important;
+  background: transparent !important;
 }
 .designer-sheet .Sortable .rfb-item {
   background: rgba(255, 255, 255, 0.92);
@@ -261,6 +331,31 @@
 .designer-sheet .Sortable .rfb-item:hover {
   border-color: #b9e6e0 !important;
   box-shadow: none;
+}
+.designer-sheet-geometry .designer-preview-geometry {
+  min-height: 0 !important;
+}
+.designer-sheet-geometry .rfb-card[data-element="Table"],
+.designer-sheet-geometry .rfb-card[data-element="Table"] > div,
+.designer-sheet-geometry .rfb-card[data-element="Table"] .table-responsive {
+  width: max-content !important;
+  min-width: 100% !important;
+}
+.designer-sheet-geometry .rfb-card[data-element="Table"] .rfb-table {
+  width: max-content !important;
+  min-width: 100% !important;
+}
+.designer-sheet-geometry .designer-preview-geometry-inner {
+  min-height: 0 !important;
+}
+.designer-sheet-geometry .Sortable .rfb-item,
+.designer-sheet-geometry .Sortable .rfb-item:hover {
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  background: transparent !important;
 }
 /* a field in a row's column is given the column's full width: its padding stays inside it */
 .designer-sheet .rfb-child > .rfb-item {
