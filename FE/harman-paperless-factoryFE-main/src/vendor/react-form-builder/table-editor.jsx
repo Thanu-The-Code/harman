@@ -42,7 +42,11 @@ export default class TableEditor extends React.Component {
   }
 
   setText(part, r, c, e) {
-    this.grid(part)[r][c].text = e.target.value;
+    const cell = this.grid(part)[r][c];
+    if (part === 'body' && T.isInput(cell)) {
+      delete cell.input;
+    }
+    cell.text = e.target.value;
     if (part === 'header') T.syncColumnTexts(this.props.element);
     this.props.onChange();
   }
@@ -54,7 +58,7 @@ export default class TableEditor extends React.Component {
     this.structure(() => {
       if (kind === 'fixed') {
         delete cell.input;
-        cell.text = cell.text || 'Text';
+        cell.text = cell.text || '';
       } else {
         delete cell.text;
         cell.input = kind;
@@ -101,12 +105,16 @@ export default class TableEditor extends React.Component {
     const fixed = part === 'header' || !T.isInput(cell);
     return (
       <td key={c} {...span} className={`te-cell${active ? ' te-active' : ''}${fixed ? '' : ' te-input'}`} onMouseDown={select}>
-        {fixed ? (
-          <textarea className="form-control form-control-sm" rows={1} value={cell.text || ''} onFocus={select}
-            onChange={this.setText.bind(this, part, r, c)} onBlur={this.props.onCommit} />
-        ) : (
-          <span className="badge badge-light te-type">{TYPE_LABELS[T.inputType(cell)]}</span>
-        )}
+        <textarea
+          className="form-control form-control-sm"
+          rows={1}
+          value={cell.text || ''}
+          placeholder=""
+          aria-label={`${part === 'header' ? 'Header' : 'Body'} cell ${r + 1}, ${c + 1}`}
+          onFocus={select}
+          onChange={this.setText.bind(this, part, r, c)}
+          onBlur={this.props.onCommit}
+        />
       </td>
     );
   }

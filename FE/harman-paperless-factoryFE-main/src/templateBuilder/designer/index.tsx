@@ -137,6 +137,18 @@ function TemplateEditor({ format, imported, step }: EditorProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Keep the browser back gesture from accidentally closing the designer while editing.
+  // The explicit Back button still provides the intentional way to leave this screen.
+  useEffect(() => {
+    const keepDesignerOpen = () => {
+      window.history.pushState(null, document.title, window.location.href);
+    };
+
+    window.history.pushState(null, document.title, window.location.href);
+    window.addEventListener("popstate", keepDesignerOpen);
+    return () => window.removeEventListener("popstate", keepDesignerOpen);
+  }, []);
+
   const { record } = history;
   const onCanvasChange = useCallback(
     (data: LayoutItem[]) => {
